@@ -45,7 +45,8 @@ if result.returncode == 0:
             norm_parts = [p.lower() for p in os.path.normpath(out_file).split(os.sep)]
             base_name = os.path.basename(out_file).lower()
             if (
-                (base_name == "certcheck-br.exe" or (base_name.startswith("certcheck_br") and base_name.endswith(".exe")))
+                "release" in norm_parts
+                and (base_name == "certcheck-br.exe" or (base_name.startswith("certcheck_br") and base_name.endswith(".exe")))
                 and os.path.isfile(out_file)
                 and os.path.abspath(out_file).lower() != os.path.abspath(dest).lower()
             ):
