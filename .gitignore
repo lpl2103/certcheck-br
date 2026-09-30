@@ -1,0 +1,12 @@
+# Build artifacts
+/target
+certcheck-br.exe.old
+certcheck-br.exe.new
+
+# Arquivos sensíveis de certificados digitais (NUNCA comitar chaves/pfx em repo público)
+*.pfx
+*.p12
+*.key
+*.pem
+*.cer
+*.crt

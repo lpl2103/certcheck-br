@@ -1,0 +1,60 @@
+[package]
+name = "certcheck-br"
+version = "0.1.0"
+edition = "2021"
+authors = ["CertCheck BR Team"]
+description = "Ferramenta técnica de diagnóstico e validação de certificados digitais ICP-Brasil A1 e A3 para Windows"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+
+[dependencies]
+# GUI Nativa de alto desempenho (modo imediato)
+eframe = { version = "0.31", default-features = false, features = [
+    "default_fonts",
+    "glow",
+] }
+egui = "0.31"
+egui_extras = "0.31"
+
+# Diálogos nativos do Windows (abertura de .pfx, .p12, .cer, etc.)
+rfd = "0.15"
+
+# Tratamento robusto de erros tipados
+thiserror = "2.0"
+
+# Decodificação do ícone da janela
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# Serialização de diagnósticos e relatórios estruturados
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Manipulação precisa de datas e validade
+chrono = { version = "0.4", features = ["serde"] }
+
+# Logging estruturado e instrumentação
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Canais concorrentes seguros entre background workers e a thread de UI
+crossbeam-channel = "0.5"
+
+# Decodificação e análise de certificados X.509 RFC 5280
+x509-parser = "0.18"
+
+# Funções de resumo criptográfico para fingerprints (SHA-256 e SHA-1)
+sha2 = "0.11"
+sha1 = "0.10"
+
+# Cliente HTTP leve para o Auto-Updater (verificação de releases no GitHub)
+ureq = "2.9"
+
+# Tratamento simplificado de erros no módulo de atualização
+anyhow = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
