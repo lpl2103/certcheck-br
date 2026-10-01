@@ -22,6 +22,7 @@ pub enum DetailTab {
     Assinatura,
     A3,
     Diagnostico,
+    Ferramentas,
     Logs,
 }
 
@@ -38,9 +39,23 @@ impl std::fmt::Display for DetailTab {
             DetailTab::Assinatura => write!(f, "Assinatura"),
             DetailTab::A3 => write!(f, "Diagnóstico A3"),
             DetailTab::Diagnostico => write!(f, "Diagnóstico Geral"),
+            DetailTab::Ferramentas => write!(f, "🛠 Ferramentas & Suporte"),
             DetailTab::Logs => write!(f, "Logs Técnicos"),
         }
     }
+}
+
+/// Filtro de exibição na barra lateral de certificados.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum SidebarFilter {
+    #[default]
+    Todos,
+    Aptos,
+    ComChavePrivada,
+    VencendoEmBreve,
+    Expirados,
+    A1,
+    A3,
 }
 
 /// Modo de tema visual da interface.
@@ -100,6 +115,16 @@ pub struct AppState {
     pub update_status: crate::updater::UpdateStatus,
     pub show_update_modal: bool,
     pub has_prompted_update: bool,
+
+    // Filtros e busca de certificados
+    pub search_query: String,
+    pub sidebar_filter: SidebarFilter,
+
+    // Ferramental, diagnóstico de ambiente e conectividade
+    pub env_diagnostic: Option<crate::tools::EnvironmentDiagnostic>,
+    pub connectivity_results: Vec<crate::tools::ServiceEndpointTest>,
+    pub file_signing_result: Option<crate::crypto::SignatureTestResult>,
+    pub tool_feedback_message: Option<(bool, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -135,6 +160,14 @@ impl AppState {
             update_status: crate::updater::UpdateStatus::Idle,
             show_update_modal: false,
             has_prompted_update: false,
+
+            search_query: String::new(),
+            sidebar_filter: SidebarFilter::Todos,
+
+            env_diagnostic: None,
+            connectivity_results: Vec::new(),
+            file_signing_result: None,
+            tool_feedback_message: None,
         }
     }
 

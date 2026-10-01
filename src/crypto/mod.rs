@@ -1,10 +1,13 @@
 //! Módulo de abstrações criptográficas e operações de assinatura.
 
 pub mod provider;
+pub mod signing;
 
 pub use provider::{
     CertificateId, CryptoProvider, HashAlgorithm, ProviderInfo, Signature, SignaturePadding,
 };
+pub use signing::execute_real_signature_test;
+
 
 use serde::{Deserialize, Serialize};
 

@@ -72,6 +72,7 @@ pub fn render_certificate_details(
             (DetailTab::Assinatura, "✍ Assinatura"),
             (DetailTab::A3, "🔐 A3 Token"),
             (DetailTab::Diagnostico, "🩺 Diagnóstico"),
+            (DetailTab::Ferramentas, "🛠 Ferramentas"),
             (DetailTab::Logs, "📜 Logs"),
         ];
 
@@ -98,6 +99,7 @@ pub fn render_certificate_details(
         DetailTab::Assinatura => render_signature_panel(ui, state, command_sender),
         DetailTab::A3 => render_a3_panel(ui, state, command_sender),
         DetailTab::Diagnostico => render_diagnostics_panel(ui, state),
+        DetailTab::Ferramentas => crate::gui::tools::render_tools_tab(ui, state, command_sender),
         DetailTab::Logs => render_logs_tab(ui, state),
     }
 }

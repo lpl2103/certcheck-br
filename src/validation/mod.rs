@@ -1,8 +1,11 @@
 //! Módulo de validação de conformidade técnica e tomada de decisão.
 
 pub mod checks;
+pub mod engine;
 
 pub use checks::{CheckCategory, CheckStatus, ValidationCheck};
+pub use engine::validate_certificate_real;
+
 
 use serde::{Deserialize, Serialize};
 

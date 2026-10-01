@@ -10,5 +10,7 @@ pub mod icp_brasil;
 pub mod logging;
 pub mod report;
 pub mod revocation;
+pub mod tools;
 pub mod updater;
 pub mod validation;
+

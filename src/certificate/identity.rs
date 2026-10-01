@@ -75,4 +75,18 @@ impl IcpBrasilIdentity {
             Some(cnpj.to_string())
         }
     }
+
+    /// Retorna o nome do responsável legal caso seja pessoa jurídica (e-CNPJ)
+    pub fn legal_representative(&self) -> Option<&str> {
+        if self.cnpj.is_some() {
+            self.holder_name.as_deref()
+        } else {
+            None
+        }
+    }
+
+    /// Verifica se possui características estruturais da ICP-Brasil
+    pub fn is_icp_brasil(&self) -> bool {
+        self.cpf.is_some() || self.cnpj.is_some() || self.person_type.is_some()
+    }
 }

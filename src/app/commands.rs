@@ -31,6 +31,18 @@ pub enum AppCommand {
     CheckForUpdates,
     /// Executar download e substituição do executável
     TriggerAutoUpdate { download_url: Option<String> },
+    /// Limpar estado e cache de sessões SSL do Schannel
+    ClearSslCache,
+    /// Instalar/atualizar cadeias oficiais da AC Raiz da ICP-Brasil no repositório de confiança
+    InstallIcpBrasilRoots,
+    /// Executar diagnóstico completo de drivers, middlewares e assinadores
+    RunEnvironmentDiagnostic,
+    /// Testar conectividade com serviços governamentais (e-CAC, PJe, Caixa, etc.)
+    RunConnectivityTest,
+    /// Exportar Laudo Técnico formatado em HTML
+    ExportReportHtml { cert_id: String, destination: PathBuf },
+    /// Assinar arquivo de teste com o certificado selecionado
+    SignTestFile { cert_id: String, file_path: PathBuf },
 }
 
 /// Eventos retornados dos workers de background para a interface gráfica.
@@ -48,4 +60,8 @@ pub enum AppEvent {
     StatusNotification(String),
     UpdateCheckCompleted(Option<crate::updater::RemoteVersionInfo>),
     UpdateStatusChanged(crate::updater::UpdateStatus),
+    EnvironmentDiagnosticCompleted(crate::tools::EnvironmentDiagnostic),
+    ConnectivityTestCompleted(Vec<crate::tools::ServiceEndpointTest>),
+    ToolOperationCompleted { tool_name: String, success: bool, message: String },
+    FileSigningCompleted { success: bool, result: crate::crypto::SignatureTestResult },
 }

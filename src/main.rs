@@ -8,11 +8,8 @@ use std::thread;
 
 use certcheck_br::app::{AppCommand, AppEvent, AppState};
 use certcheck_br::certificate::CertificateSource;
-use certcheck_br::diagnostics::{A3DiagnosticSummary, ProviderDiagnostic, ReaderInfo};
 use certcheck_br::gui::CertCheckApp;
 use certcheck_br::logging::{MemoryLayer, MemoryLogBuffer};
-use certcheck_br::revocation::{CrlDetails, OcspDetails, RevocationStatus, RevocationSummary};
-use certcheck_br::validation::{CheckCategory, CheckStatus, ValidationCheck, ValidationResult};
 
 use crossbeam_channel::{Receiver, Sender};
 use tracing_subscriber::layer::SubscriberExt;
@@ -117,18 +114,19 @@ fn background_worker(cmd_rx: Receiver<AppCommand>, evt_tx: Sender<AppEvent>) {
                             ));
                             let _ = evt_tx.send(AppEvent::CertificatesLoaded(Vec::new()));
                         } else {
-                            let first_id = certs[0].id.clone();
-                            let _ = evt_tx.send(AppEvent::CertificatesLoaded(certs));
+                            let _ = evt_tx.send(AppEvent::CertificatesLoaded(certs.clone()));
                             let _ = evt_tx.send(AppEvent::StatusNotification(format!(
                                 "{} certificado(s) carregado(s) do repositório pessoal do Windows.",
                                 total
                             )));
 
-                            let val = create_sample_validation_result(&first_id);
-                            let _ = evt_tx.send(AppEvent::ValidationCompleted {
-                                cert_id: first_id,
-                                result: val,
-                            });
+                            for c in &certs {
+                                let val = certcheck_br::validation::validate_certificate_real(c);
+                                let _ = evt_tx.send(AppEvent::ValidationCompleted {
+                                    cert_id: c.id.clone(),
+                                    result: val,
+                                });
+                            }
                         }
                     }
                     Err(e) => {
@@ -172,12 +170,13 @@ fn background_worker(cmd_rx: Receiver<AppCommand>, evt_tx: Sender<AppEvent>) {
 
                         if let Ok(cert) = certcheck_br::certificate::parser::parse_x509_der(&der, source, false, false) {
                             let cert_id = cert.id.clone();
+                            let val = certcheck_br::validation::validate_certificate_real(&cert);
+                            loaded_certs.insert(cert_id.clone(), cert.clone());
                             let _ = evt_tx.send(AppEvent::CertificateAdded(Box::new(cert)));
                             let _ = evt_tx.send(AppEvent::BusyStateChanged {
                                 is_busy: false,
                                 message: String::new(),
                             });
-                            let val = create_sample_validation_result(&cert_id);
                             let _ = evt_tx.send(AppEvent::ValidationCompleted {
                                 cert_id,
                                 result: val,
@@ -222,9 +221,9 @@ fn background_worker(cmd_rx: Receiver<AppCommand>, evt_tx: Sender<AppEvent>) {
                                 for cert in subscriber_certs {
                                     let cert_id = cert.id.clone();
                                     let cn = cert.subject.clean_name().to_string();
+                                    let val = certcheck_br::validation::validate_certificate_real(&cert);
                                     loaded_certs.insert(cert_id.clone(), cert.clone());
                                     let _ = evt_tx.send(AppEvent::CertificateAdded(Box::new(cert)));
-                                    let val = create_sample_validation_result(&cert_id);
                                     let _ = evt_tx.send(AppEvent::ValidationCompleted {
                                         cert_id,
                                         result: val,
@@ -266,43 +265,13 @@ fn background_worker(cmd_rx: Receiver<AppCommand>, evt_tx: Sender<AppEvent>) {
                 });
             }
             AppCommand::DetectA3Hardware => {
-                tracing::info!("Iniciando detecção de hardware A3 (leitores e tokens)...");
+                tracing::info!("Iniciando detecção real de hardware A3 (leitores e tokens via PC/SC)...");
                 let _ = evt_tx.send(AppEvent::BusyStateChanged {
                     is_busy: true,
-                    message: "Buscando leitores de Smart Card e tokens USB...".to_string(),
+                    message: "Varrendo leitoras de Smart Card e tokens USB via WinSCard...".to_string(),
                 });
 
-                thread::sleep(std::time::Duration::from_millis(400));
-
-                let summary = A3DiagnosticSummary {
-                    reader_detected: true,
-                    smart_card_detected: true,
-                    token_detected: true,
-                    provider_detected: true,
-                    ksp_csp_detected: true,
-                    certificate_detected: true,
-                    private_key_accessible: true,
-                    signature_test_passed: true,
-                    readers: vec![
-                        ReaderInfo {
-                            name: "OMNIKEY CardMan 3x21 0".to_string(),
-                            is_card_present: true,
-                            card_atr_hex: Some("3B 7F 96 00 00 80 31 80 65 B0 83 11 00 C8 83 00 90 00".to_string()),
-                            status: "Pronto / Cartão Inserido".to_string(),
-                        },
-                    ],
-                    tokens: vec![],
-                    providers: vec![
-                        ProviderDiagnostic {
-                            name: "Microsoft Smart Card Key Storage Provider".to_string(),
-                            provider_type: "KSP (CNG)".to_string(),
-                            container_name: Some("{949214CA-42BE-40F1-8B02}".to_string()),
-                            is_available: true,
-                            description: Some("KSP padrão do Windows para Smart Cards".to_string()),
-                        },
-                    ],
-                    possible_causes_for_failure: vec![],
-                };
+                let summary = certcheck_br::diagnostics::scan_a3_hardware();
 
                 let _ = evt_tx.send(AppEvent::A3DiagnosticsUpdated(summary));
                 let _ = evt_tx.send(AppEvent::BusyStateChanged {
@@ -312,143 +281,60 @@ fn background_worker(cmd_rx: Receiver<AppCommand>, evt_tx: Sender<AppEvent>) {
                 tracing::info!("Diagnóstico de hardware A3 concluído.");
             }
             AppCommand::ValidateCertificate { cert_id } => {
-                tracing::info!("Executando validação técnica para {}", cert_id);
+                tracing::info!("Executando validação técnica real para {}", cert_id);
                 let _ = evt_tx.send(AppEvent::BusyStateChanged {
                     is_busy: true,
                     message: "Executando conjunto de validações X.509 e ICP-Brasil...".to_string(),
                 });
 
-                thread::sleep(std::time::Duration::from_millis(350));
-                let result = create_sample_validation_result(&cert_id);
-                let _ = evt_tx.send(AppEvent::ValidationCompleted { cert_id, result });
+                if let Some(cert) = loaded_certs.get(&cert_id) {
+                    let result = certcheck_br::validation::validate_certificate_real(cert);
+                    let _ = evt_tx.send(AppEvent::ValidationCompleted { cert_id, result });
+                }
+
                 let _ = evt_tx.send(AppEvent::BusyStateChanged {
                     is_busy: false,
                     message: String::new(),
                 });
             }
             AppCommand::CheckRevocation { cert_id } => {
-                tracing::info!("Consultando status de revogação para {}", cert_id);
+                tracing::info!("Consultando revogação online real para {}", cert_id);
                 let _ = evt_tx.send(AppEvent::BusyStateChanged {
                     is_busy: true,
-                    message: "Consultando servidores OCSP e listas CRL...".to_string(),
+                    message: "Baixando listas CRL e consultando servidores OCSP...".to_string(),
                 });
 
-                thread::sleep(std::time::Duration::from_millis(500));
+                if let Some(cert) = loaded_certs.get(&cert_id) {
+                    let summary = certcheck_br::revocation::verify_revocation_online(cert);
+                    let _ = evt_tx.send(AppEvent::RevocationCompleted { cert_id, summary });
+                }
 
-                let crl_checks = if let Some(cert) = loaded_certs.get(&cert_id) {
-                    if cert.extensions.crl_distribution_points.is_empty() {
-                        vec![CrlDetails {
-                            url: "http://crl.certisign.com.br/multiplag7.crl".to_string(),
-                            status: RevocationStatus::Good,
-                            this_update: Some(chrono::Utc::now() - chrono::Duration::hours(6)),
-                            next_update: Some(chrono::Utc::now() + chrono::Duration::hours(18)),
-                            crl_number: Some("14829".to_string()),
-                            issuer: Some(cert.issuer.clean_name().to_string()),
-                            revocation_time: None,
-                            revocation_reason: None,
-                            error_message: None,
-                            cached: false,
-                        }]
-                    } else {
-                        cert.extensions.crl_distribution_points.iter().map(|url| {
-                            CrlDetails {
-                                url: url.clone(),
-                                status: RevocationStatus::Good,
-                                this_update: Some(chrono::Utc::now() - chrono::Duration::hours(4)),
-                                next_update: Some(chrono::Utc::now() + chrono::Duration::hours(20)),
-                                crl_number: Some("15284".to_string()),
-                                issuer: Some(cert.issuer.clean_name().to_string()),
-                                revocation_time: None,
-                                revocation_reason: None,
-                                error_message: None,
-                                cached: false,
-                            }
-                        }).collect()
-                    }
-                } else {
-                    vec![CrlDetails {
-                        url: "http://crl.certisign.com.br/multiplag7.crl".to_string(),
-                        status: RevocationStatus::Good,
-                        this_update: Some(chrono::Utc::now() - chrono::Duration::hours(6)),
-                        next_update: Some(chrono::Utc::now() + chrono::Duration::hours(18)),
-                        crl_number: Some("14829".to_string()),
-                        issuer: Some("AC ICP-Brasil".to_string()),
-                        revocation_time: None,
-                        revocation_reason: None,
-                        error_message: None,
-                        cached: false,
-                    }]
-                };
-
-                let ocsp_checks = if let Some(cert) = loaded_certs.get(&cert_id) {
-                    if cert.extensions.ocsp_servers.is_empty() {
-                        vec![OcspDetails {
-                            url: "http://ocsp.certisign.com.br".to_string(),
-                            status: RevocationStatus::Good,
-                            responder_id: Some(format!("OCSP Responder ({})", cert.issuer.clean_name())),
-                            produced_at: Some(chrono::Utc::now()),
-                            this_update: Some(chrono::Utc::now() - chrono::Duration::minutes(10)),
-                            next_update: Some(chrono::Utc::now() + chrono::Duration::hours(24)),
-                            revocation_time: None,
-                            revocation_reason: None,
-                            error_message: None,
-                        }]
-                    } else {
-                        cert.extensions.ocsp_servers.iter().map(|url| {
-                            OcspDetails {
-                                url: url.clone(),
-                                status: RevocationStatus::Good,
-                                responder_id: Some(format!("OCSP Responder ({})", cert.issuer.clean_name())),
-                                produced_at: Some(chrono::Utc::now()),
-                                this_update: Some(chrono::Utc::now() - chrono::Duration::minutes(15)),
-                                next_update: Some(chrono::Utc::now() + chrono::Duration::hours(24)),
-                                revocation_time: None,
-                                revocation_reason: None,
-                                error_message: None,
-                            }
-                        }).collect()
-                    }
-                } else {
-                    vec![OcspDetails {
-                        url: "http://ocsp.certisign.com.br".to_string(),
-                        status: RevocationStatus::Good,
-                        responder_id: Some("OCSP Responder Certisign G7".to_string()),
-                        produced_at: Some(chrono::Utc::now()),
-                        this_update: Some(chrono::Utc::now() - chrono::Duration::minutes(10)),
-                        next_update: Some(chrono::Utc::now() + chrono::Duration::hours(24)),
-                        revocation_time: None,
-                        revocation_reason: None,
-                        error_message: None,
-                    }]
-                };
-
-                let mut summary = RevocationSummary {
-                    final_status: None,
-                    crl_checks,
-                    ocsp_checks,
-                };
-                summary.determine_status();
-
-                let _ = evt_tx.send(AppEvent::RevocationCompleted { cert_id, summary });
                 let _ = evt_tx.send(AppEvent::BusyStateChanged {
                     is_busy: false,
                     message: String::new(),
                 });
             }
             AppCommand::TestSignature { cert_id, hash_alg } => {
-                tracing::info!("Executando teste criptográfico de assinatura ({}) para {}", hash_alg, cert_id);
+                tracing::info!("Executando teste real de assinatura com chave privada ({}) para {}", hash_alg, cert_id);
                 let _ = evt_tx.send(AppEvent::BusyStateChanged {
                     is_busy: true,
-                    message: "Assinando desafio e verificando com chave pública...".to_string(),
+                    message: "Assinando desafio via CryptoAPI/CNG (solicitação de PIN se A3)...".to_string(),
                 });
 
-                thread::sleep(std::time::Duration::from_millis(300));
+                if let Some(cert) = loaded_certs.get(&cert_id) {
+                    let res = certcheck_br::crypto::execute_real_signature_test(cert, b"Desafio de Teste de Assinatura Digital CertCheck BR");
+                    let msg = if res.success {
+                        "Assinatura gerada pela chave privada e verificada com sucesso com a chave pública!".to_string()
+                    } else {
+                        res.error_message.clone().unwrap_or_else(|| "Falha no teste de assinatura.".to_string())
+                    };
+                    let _ = evt_tx.send(AppEvent::SignatureTestCompleted {
+                        cert_id,
+                        success: res.success,
+                        message: msg,
+                    });
+                }
 
-                let _ = evt_tx.send(AppEvent::SignatureTestCompleted {
-                    cert_id,
-                    success: true,
-                    message: "Assinatura gerada e verificada com sucesso matematicamente com chave pública!".to_string(),
-                });
                 let _ = evt_tx.send(AppEvent::BusyStateChanged {
                     is_busy: false,
                     message: String::new(),
@@ -479,104 +365,116 @@ fn background_worker(cmd_rx: Receiver<AppCommand>, evt_tx: Sender<AppEvent>) {
                     }
                 });
             }
+            AppCommand::ClearSslCache => {
+                let worker_evt_tx = evt_tx.clone();
+                thread::spawn(move || {
+                    let res = certcheck_br::tools::clear_windows_ssl_cache();
+                    let (success, message) = match res {
+                        Ok(msg) => (true, msg),
+                        Err(e) => (false, e),
+                    };
+                    let _ = worker_evt_tx.send(AppEvent::ToolOperationCompleted {
+                        tool_name: "Limpeza de Estado SSL".to_string(),
+                        success,
+                        message,
+                    });
+                });
+            }
+            AppCommand::InstallIcpBrasilRoots => {
+                let worker_evt_tx = evt_tx.clone();
+                let _ = evt_tx.send(AppEvent::BusyStateChanged {
+                    is_busy: true,
+                    message: "Baixando e instalando cadeias da AC Raiz da ICP-Brasil...".to_string(),
+                });
+                thread::spawn(move || {
+                    let res = certcheck_br::tools::install_official_icp_brasil_roots();
+                    let (success, message) = match res {
+                        Ok(msg) => (true, msg),
+                        Err(e) => (false, e),
+                    };
+                    let _ = worker_evt_tx.send(AppEvent::ToolOperationCompleted {
+                        tool_name: "Instalação de Cadeias ICP-Brasil".to_string(),
+                        success,
+                        message,
+                    });
+                    let _ = worker_evt_tx.send(AppEvent::BusyStateChanged {
+                        is_busy: false,
+                        message: String::new(),
+                    });
+                });
+            }
+            AppCommand::RunEnvironmentDiagnostic => {
+                let worker_evt_tx = evt_tx.clone();
+                let _ = evt_tx.send(AppEvent::BusyStateChanged {
+                    is_busy: true,
+                    message: "Analisando drivers, middlewares e assinadores do sistema...".to_string(),
+                });
+                thread::spawn(move || {
+                    let diag = certcheck_br::tools::run_environment_diagnostic();
+                    let _ = worker_evt_tx.send(AppEvent::EnvironmentDiagnosticCompleted(diag));
+                    let _ = worker_evt_tx.send(AppEvent::BusyStateChanged {
+                        is_busy: false,
+                        message: String::new(),
+                    });
+                });
+            }
+            AppCommand::RunConnectivityTest => {
+                let worker_evt_tx = evt_tx.clone();
+                let _ = evt_tx.send(AppEvent::BusyStateChanged {
+                    is_busy: true,
+                    message: "Testando conectividade TLS com portais governamentais...".to_string(),
+                });
+                thread::spawn(move || {
+                    let tests = certcheck_br::tools::run_government_services_test();
+                    let _ = worker_evt_tx.send(AppEvent::ConnectivityTestCompleted(tests));
+                    let _ = worker_evt_tx.send(AppEvent::BusyStateChanged {
+                        is_busy: false,
+                        message: String::new(),
+                    });
+                });
+            }
+            AppCommand::ExportReportHtml { cert_id, destination } => {
+                if let Some(cert) = loaded_certs.get(&cert_id) {
+                    let val = certcheck_br::validation::validate_certificate_real(cert);
+                    let rev = certcheck_br::revocation::verify_revocation_online(cert);
+                    let a3 = Some(certcheck_br::diagnostics::scan_a3_hardware());
+                    let rep = certcheck_br::report::DiagnosticReport::new(cert.clone(), val, rev, a3);
+                    let html = certcheck_br::report::generate_html_report(&rep);
+                    if let Ok(_) = std::fs::write(&destination, html) {
+                        let _ = evt_tx.send(AppEvent::StatusNotification(format!(
+                            "Laudo Técnico HTML gerado com sucesso em: {:?}",
+                            destination
+                        )));
+                    } else {
+                        let _ = evt_tx.send(AppEvent::StatusNotification(format!(
+                            "Falha ao salvar Laudo Técnico em {:?}",
+                            destination
+                        )));
+                    }
+                }
+            }
+            AppCommand::SignTestFile { cert_id, file_path } => {
+                let worker_evt_tx = evt_tx.clone();
+                let cert_opt = loaded_certs.get(&cert_id).cloned();
+                thread::spawn(move || {
+                    if let Some(cert) = cert_opt {
+                        match std::fs::read(&file_path) {
+                            Ok(bytes) => {
+                                let res = certcheck_br::crypto::execute_real_signature_test(&cert, &bytes);
+                                let _ = worker_evt_tx.send(AppEvent::FileSigningCompleted {
+                                    success: res.success,
+                                    result: res,
+                                });
+                            }
+                            Err(e) => {
+                                let _ = worker_evt_tx.send(AppEvent::StatusNotification(format!(
+                                    "Erro ao ler arquivo para teste de assinatura: {e}"
+                                )));
+                            }
+                        }
+                    }
+                });
+            }
         }
     }
-}
-
-
-
-/// Cria um resultado de validação de exemplo com todas as checagens técnicas estruturadas.
-fn create_sample_validation_result(_cert_id: &str) -> ValidationResult {
-    let mut val = ValidationResult::new();
-
-    val.add_check(ValidationCheck::new(
-        CheckCategory::X509Structure,
-        "Estrutura ASN.1 / DER",
-        CheckStatus::Pass,
-        "Codificação DER válida e campos X.509 conformes com RFC 5280.",
-        Some("Versão: v3 (0x02). Serial decodificado com sucesso."),
-    ));
-
-    val.add_check(ValidationCheck::new(
-        CheckCategory::ValidityPeriod,
-        "Período de Validade",
-        CheckStatus::Pass,
-        "Certificado dentro da validade temporal.",
-        Some("Not Before e Not After validados contra o relógio do sistema."),
-    ));
-
-    val.add_check(ValidationCheck::new(
-        CheckCategory::KeyCharacteristics,
-        "Parâmetros da Chave Pública",
-        CheckStatus::Pass,
-        "RSA 2048 bits com expoente 65537 atende às normas do ITI.",
-        Some("Algoritmo da chave pública aceito para o padrão ICP-Brasil."),
-    ));
-
-    val.add_check(ValidationCheck::new(
-        CheckCategory::KeyUsage,
-        "Propriedades de Key Usage",
-        CheckStatus::Pass,
-        "Extensão Key Usage possui Digital Signature e Non Repudiation.",
-        Some("Compatível com assinatura de documentos e transações fiscais."),
-    ));
-
-    val.add_check(ValidationCheck::new(
-        CheckCategory::ExtendedKeyUsage,
-        "Extended Key Usage (EKU)",
-        CheckStatus::Pass,
-        "Contém Client Authentication (clientAuth).",
-        Some("Permite autenticação em sistemas web (e-CAC, Conectividade Social, etc.)."),
-    ));
-
-    val.add_check(ValidationCheck::new(
-        CheckCategory::BasicConstraints,
-        "Basic Constraints",
-        CheckStatus::Pass,
-        "Certificado final (CA=FALSE).",
-        Some("Não possui permissão indevida para emitir outros certificados."),
-    ));
-
-    val.add_check(ValidationCheck::new(
-        CheckCategory::TrustChain,
-        "Cadeia de Certificação",
-        CheckStatus::Pass,
-        "Cadeia construída e ancorada em Raiz Confiável.",
-        Some("Raiz AC Raiz da ICP-Brasil encontrada no repositório de confiança."),
-    ));
-
-    val.add_check(ValidationCheck::new(
-        CheckCategory::IcpBrasilPolicy,
-        "Políticas ICP-Brasil (DOC-ICP-04)",
-        CheckStatus::Pass,
-        "Atributos de CPF/CNPJ presentes em SAN e OIDs normativos válidos.",
-        Some("Identificação formal válida conforme especificações do ITI."),
-    ));
-
-    val.add_check(ValidationCheck::new(
-        CheckCategory::RevocationOcsp,
-        "Revogação via OCSP",
-        CheckStatus::Pass,
-        "Resposta OCSP recebida: Status GOOD.",
-        Some("Respondedor autorizado assinou a resposta dentro do prazo de validade."),
-    ));
-
-    val.add_check(ValidationCheck::new(
-        CheckCategory::RevocationCrl,
-        "Revogação via CRL",
-        CheckStatus::Pass,
-        "Lista CRL consultada. Certificado não encontrado na lista de revogados.",
-        Some("Número de série não consta no arquivo CRL da Autoridade Certificadora."),
-    ));
-
-    val.add_check(ValidationCheck::new(
-        CheckCategory::CryptographicSignature,
-        "Operação de Assinatura Digital",
-        CheckStatus::Pass,
-        "Teste de assinatura e verificação aprovado.",
-        Some("Chave privada assinou o desafio com sucesso; chave pública verificou a assinatura."),
-    ));
-
-    val.compute_overall_status();
-    val
 }

@@ -9,6 +9,7 @@ pub mod revocation;
 pub mod settings;
 pub mod signature;
 pub mod theme;
+pub mod tools;
 pub mod validation;
 
 use crate::app::{AppCommand, AppEvent, AppState, ThemeMode};
@@ -107,6 +108,18 @@ impl CertCheckApp {
                 }
                 AppEvent::UpdateStatusChanged(status) => {
                     self.state.update_status = status;
+                }
+                AppEvent::EnvironmentDiagnosticCompleted(diag) => {
+                    self.state.env_diagnostic = Some(diag);
+                }
+                AppEvent::ConnectivityTestCompleted(tests) => {
+                    self.state.connectivity_results = tests;
+                }
+                AppEvent::ToolOperationCompleted { tool_name, success, message } => {
+                    self.state.tool_feedback_message = Some((success, format!("{tool_name}: {message}")));
+                }
+                AppEvent::FileSigningCompleted { success: _, result } => {
+                    self.state.file_signing_result = Some(result);
                 }
             }
         }
