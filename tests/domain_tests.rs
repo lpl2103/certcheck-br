@@ -352,9 +352,23 @@ fn test_pfx_import_without_password() {
         let bytes = std::fs::read(path).unwrap();
         let res = import_pfx_certificates(&bytes, None, file_name);
         println!("File: {} -> Result: {:?}", file_name, res.is_ok());
+        if let Ok(ref certs) = res {
+            println!("  Total certs in PFX: {}", certs.len());
+            for (idx, c) in certs.iter().enumerate() {
+                let is_ca = c.extensions.basic_constraints.as_ref().map(|bc| bc.is_ca).unwrap_or(false);
+                println!("  [{}] CN: {} | is_ca: {} | has_pk: {} | hw: {}", idx, c.subject.clean_name(), is_ca, c.has_private_key, c.is_hardware_backed);
+            }
+        }
         if let Err(ref e) = res {
             println!("Error: {:?}", e);
         }
     }
 }
+
+#[test]
+fn test_check_for_updates_runs() {
+    let info = certcheck_br::updater::check_for_updates();
+    println!("Update info: {:?}", info);
+}
+
 

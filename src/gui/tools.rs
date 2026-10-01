@@ -137,23 +137,26 @@ pub fn render_tools_tab(
                     let has_selected = state.selected_cert_id.is_some();
 
                     if ui.add_enabled(has_selected, report_btn).clicked() {
-                        if let Some(cert) = state.selected_certificate() {
+                        if let Some(cert) = state.selected_certificate().cloned() {
                             let default_filename = format!(
                                 "Laudo_Tecnico_{}.html",
                                 cert.subject.clean_name().replace([' ', '/', '\\', ':', '.'], "_")
                             );
-                            let dialog = rfd::FileDialog::new()
-                                .set_file_name(&default_filename)
-                                .add_filter("Documento HTML (*.html)", &["html"]);
+                            let sender = command_sender.clone();
+                            std::thread::spawn(move || {
+                                let dialog = rfd::FileDialog::new()
+                                    .set_file_name(&default_filename)
+                                    .add_filter("Documento HTML (*.html)", &["html"]);
 
-                            if let Some(dest) = dialog.save_file() {
-                                let _ = command_sender.send(AppCommand::ExportReportHtml {
-                                    cert_id: cert.id.clone(),
-                                    destination: dest.clone(),
-                                });
-                                // Abre no navegador padrão
-                                let _ = std::process::Command::new("explorer").arg(&dest).spawn();
-                            }
+                                if let Some(dest) = dialog.save_file() {
+                                    let _ = sender.send(AppCommand::ExportReportHtml {
+                                        cert_id: cert.id.clone(),
+                                        destination: dest.clone(),
+                                    });
+                                    // Abre no navegador padrão
+                                    let _ = std::process::Command::new("explorer").arg(&dest).spawn();
+                                }
+                            });
                         }
                     }
 
@@ -357,15 +360,18 @@ pub fn render_tools_tab(
                 ui.horizontal(|ui| {
                     let sign_btn = egui::Button::new(RichText::new("📂 Selecionar Arquivo para Assinar...").strong().size(13.0));
                     if ui.add_enabled(has_selected, sign_btn).clicked() {
-                        if let Some(cert) = state.selected_certificate() {
-                            let dialog = rfd::FileDialog::new()
-                                .set_title("Selecione um arquivo para teste de assinatura criptográfica");
-                            if let Some(path) = dialog.pick_file() {
-                                let _ = command_sender.send(AppCommand::SignTestFile {
-                                    cert_id: cert.id.clone(),
-                                    file_path: path,
-                                });
-                            }
+                        if let Some(cert) = state.selected_certificate().cloned() {
+                            let sender = command_sender.clone();
+                            std::thread::spawn(move || {
+                                let dialog = rfd::FileDialog::new()
+                                    .set_title("Selecione um arquivo para teste de assinatura criptográfica");
+                                if let Some(path) = dialog.pick_file() {
+                                    let _ = sender.send(AppCommand::SignTestFile {
+                                        cert_id: cert.id.clone(),
+                                        file_path: path,
+                                    });
+                                }
+                            });
                         }
                     }
 

@@ -57,11 +57,16 @@ impl CertCheckApp {
                     self.state.is_busy = is_busy;
                     self.state.busy_message = message;
                 }
-                AppEvent::CertificatesLoaded(certs) => {
-                    if let Some(first) = certs.first() {
-                        self.state.selected_cert_id = Some(first.id.clone());
+                AppEvent::CertificatesLoaded(store_certs) => {
+                    self.state.certificates.retain(|c| !matches!(c.source, crate::certificate::CertificateSource::WindowsStore { .. }));
+                    for c in &store_certs {
+                        self.state.certificates.push(c.clone());
                     }
-                    self.state.certificates = certs;
+                    if self.state.selected_cert_id.is_none() {
+                        if let Some(first) = self.state.certificates.first() {
+                            self.state.selected_cert_id = Some(first.id.clone());
+                        }
+                    }
                     self.state.password_prompt = None;
                 }
                 AppEvent::CertificateAdded(cert) => {
@@ -71,6 +76,7 @@ impl CertCheckApp {
                     self.state.selected_cert_id = Some(id);
                     self.state.password_prompt = None;
                     self.state.last_error_message = None;
+                    self.state.last_status_message = None;
                 }
                 AppEvent::ValidationCompleted { cert_id, result } => {
                     self.state.validation_results.insert(cert_id, result);
@@ -403,13 +409,6 @@ fn render_password_dialog(
 
     if submit_password {
         state.last_error_message = None;
-        let file_name = prompt
-            .file_path
-            .file_name()
-            .and_then(|f| f.to_str())
-            .unwrap_or("certificado")
-            .to_string();
-        state.last_status_message = Some(format!("Descriptografando {}...", file_name));
         let _ = command_sender.send(AppCommand::LoadCertificateFile {
             path: prompt.file_path.clone(),
             password: Some(prompt.password_input.clone()),

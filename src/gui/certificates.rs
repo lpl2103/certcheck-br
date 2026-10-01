@@ -63,33 +63,32 @@ pub fn render_certificates_sidebar(
         let file_btn = egui::Button::new(RichText::new("📂 Abrir Arquivo").size(12.5))
             .min_size(egui::vec2(btn_width, 28.0));
         if ui.add(file_btn).clicked() {
-            let dialog = rfd::FileDialog::new()
-                .add_filter(
-                    "Certificados Digitais (*.pfx, *.p12, *.cer, *.crt, *.pem)",
-                    &[
-                        "pfx", "p12", "cer", "crt", "pem",
-                        "PFX", "P12", "CER", "CRT", "PEM",
-                    ],
-                )
-                .add_filter("Arquivos PKCS#12 (*.pfx, *.p12)", &["pfx", "p12", "PFX", "P12"])
-                .add_filter("Certificados X.509 (*.cer, *.crt, *.pem)", &["cer", "crt", "pem", "CER", "CRT", "PEM"])
-                .add_filter("Todos os Arquivos (*.*)", &["*"])
-                .set_title("Selecionar Certificado Digital");
+            let sender = command_sender.clone();
+            let ctx = ui.ctx().clone();
+            state.last_error_message = None;
 
-            if let Some(path) = dialog.pick_file() {
-                let file_name = path
-                    .file_name()
-                    .and_then(|f| f.to_str())
-                    .unwrap_or("arquivo")
-                    .to_string();
-                state.last_error_message = None;
-                state.last_status_message = Some(format!("Carregando {}...", file_name));
-                let _ = command_sender.send(AppCommand::LoadCertificateFile {
-                    path,
-                    password: None,
-                });
-                ui.ctx().request_repaint();
-            }
+            std::thread::spawn(move || {
+                let dialog = rfd::FileDialog::new()
+                    .add_filter(
+                        "Certificados Digitais (*.pfx, *.p12, *.cer, *.crt, *.pem)",
+                        &[
+                            "pfx", "p12", "cer", "crt", "pem",
+                            "PFX", "P12", "CER", "CRT", "PEM",
+                        ],
+                    )
+                    .add_filter("Arquivos PKCS#12 (*.pfx, *.p12)", &["pfx", "p12", "PFX", "P12"])
+                    .add_filter("Certificados X.509 (*.cer, *.crt, *.pem)", &["cer", "crt", "pem", "CER", "CRT", "PEM"])
+                    .add_filter("Todos os Arquivos (*.*)", &["*"])
+                    .set_title("Selecionar Certificado Digital");
+
+                if let Some(path) = dialog.pick_file() {
+                    let _ = sender.send(AppCommand::LoadCertificateFile {
+                        path,
+                        password: None,
+                    });
+                    ctx.request_repaint();
+                }
+            });
         }
 
         let a3_btn = egui::Button::new(RichText::new("🔐 Detectar A3").size(12.5))
