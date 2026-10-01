@@ -87,6 +87,7 @@ pub fn parse_x509_der(
         identity,
         has_private_key,
         is_hardware_backed,
+        raw_der: der.to_vec(),
     })
 }
 

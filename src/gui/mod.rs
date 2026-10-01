@@ -41,6 +41,15 @@ impl CertCheckApp {
         // Inicializa tema padrão
         configure_visuals(&cc.egui_ctx, state.theme_mode);
 
+        // Auto-carregamento imediato de certificados digitais da pasta local ao iniciar
+        let local_certs = crate::gui::certificates::find_local_certificates();
+        for p in local_certs {
+            let _ = command_sender.send(AppCommand::LoadCertificateFile {
+                path: p,
+                password: None,
+            });
+        }
+
         Self {
             state,
             command_sender,
@@ -72,9 +81,12 @@ impl CertCheckApp {
                 }
                 AppEvent::CertificateAdded(cert) => {
                     let id = cert.id.clone();
+                    let is_first = self.state.certificates.is_empty();
                     self.state.certificates.retain(|c| c.id != id);
                     self.state.certificates.push(*cert);
-                    self.state.selected_cert_id = Some(id);
+                    if self.state.selected_cert_id.is_none() || is_first {
+                        self.state.selected_cert_id = Some(id);
+                    }
                     self.state.password_prompt = None;
                     self.state.last_error_message = None;
                     self.state.last_status_message = None;

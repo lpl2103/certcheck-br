@@ -9,6 +9,12 @@ use egui::{Color32, CornerRadius, Frame, Margin, RichText, Stroke, Ui};
 pub fn render_dashboard(ui: &mut Ui, state: &mut AppState, command_sender: &Sender<AppCommand>) {
     let colors = ThemeColors::for_mode(state.theme_mode);
 
+    if state.selected_cert_id.is_none() && !state.certificates.is_empty() {
+        if let Some(first) = state.certificates.first() {
+            state.selected_cert_id = Some(first.id.clone());
+        }
+    }
+
     let Some(cert) = state.selected_certificate().cloned() else {
         render_empty_dashboard(ui, state, command_sender, &colors);
         return;
@@ -345,6 +351,7 @@ fn render_empty_dashboard(
                                         password: None,
                                     });
                                 }
+                                ui.ctx().request_repaint();
                             }
                         });
                     });
@@ -360,12 +367,18 @@ fn render_empty_dashboard(
                             ui.label(RichText::new(file_name).size(12.5).strong());
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                let btn = egui::Button::new(RichText::new("🔓 Abrir").size(11.5));
+                                let btn = egui::Button::new(
+                                    RichText::new("🔓 Abrir").strong().color(Color32::WHITE).size(11.5)
+                                )
+                                .fill(colors.accent)
+                                .corner_radius(CornerRadius::same(5));
+
                                 if ui.add(btn).clicked() {
                                     let _ = command_sender.send(AppCommand::LoadCertificateFile {
                                         path: path.clone(),
                                         password: None,
                                     });
+                                    ui.ctx().request_repaint();
                                 }
                             });
                         });

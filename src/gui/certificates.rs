@@ -231,6 +231,7 @@ pub fn render_certificates_sidebar(
                                                 password: None,
                                             });
                                         }
+                                        ui.ctx().request_repaint();
                                     }
                                 });
                             });
@@ -248,6 +249,7 @@ pub fn render_certificates_sidebar(
                                             path: path.clone(),
                                             password: None,
                                         });
+                                        ui.ctx().request_repaint();
                                     }
                                 });
                                 ui.add_space(2.0);
@@ -399,18 +401,52 @@ pub fn render_certificates_sidebar(
                                 }
                             });
                         });
+
+                        ui.add_space(5.0);
+                        ui.separator();
+                        ui.add_space(3.0);
+
+                        // Botões de Ação Direta no Cartão
+                        ui.horizontal(|ui| {
+                            let open_btn = if is_selected {
+                                egui::Button::new(
+                                    RichText::new("👁 Selecionado").strong().size(11.0).color(colors.accent)
+                                ).fill(colors.accent.gamma_multiply(0.2))
+                            } else {
+                                egui::Button::new(
+                                    RichText::new("👁 Abrir Diagnóstico").strong().size(11.0).color(Color32::WHITE)
+                                ).fill(colors.accent)
+                            };
+
+                            if ui.add(open_btn).clicked() {
+                                state.selected_cert_id = Some(cert_id.clone());
+                                ui.ctx().request_repaint();
+                            }
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let win_btn = egui::Button::new(RichText::new("🖥 Abrir no Windows").size(11.0));
+                                if ui.add(win_btn).on_hover_text("Abre a janela nativa de Certificado do Windows (certmgr)").clicked() {
+                                    state.selected_cert_id = Some(cert_id.clone());
+                                    let _ = crate::certificate::open_in_windows_viewer(cert);
+                                    ui.ctx().request_repaint();
+                                }
+                            });
+                        });
                     });
 
-                // Torna todo o cartão clicável para seleção
-                let interact_rect = card_response.response.rect;
-                let click_response = ui.interact(
-                    interact_rect,
-                    ui.id().with(&cert.id),
-                    egui::Sense::click(),
-                );
-
-                if click_response.clicked() {
-                    state.selected_cert_id = Some(cert_id);
+                // Torna todo o cartão clicável para seleção e duplo clique para abrir no Windows
+                let card_interact = card_response.response.interact(egui::Sense::click());
+                if card_interact.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
+                if card_interact.clicked() {
+                    state.selected_cert_id = Some(cert_id.clone());
+                    ui.ctx().request_repaint();
+                }
+                if card_interact.double_clicked() {
+                    state.selected_cert_id = Some(cert_id.clone());
+                    let _ = crate::certificate::open_in_windows_viewer(cert);
+                    ui.ctx().request_repaint();
                 }
 
                 ui.add_space(8.0);

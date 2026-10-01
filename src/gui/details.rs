@@ -23,7 +23,9 @@ pub fn render_certificate_details(
     if let Some(cert) = state.selected_certificate().cloned() {
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(4.0);
+                if ui.button(RichText::new("🖥 Abrir no Windows").strong()).on_hover_text("Abre a janela nativa de Certificado do Windows (certmgr)").clicked() {
+                    let _ = crate::certificate::open_in_windows_viewer(&cert);
+                }
                 if ui.button(RichText::new("⚡ Revalidar").color(colors.pass).strong()).clicked() {
                     let _ = command_sender.send(AppCommand::ValidateCertificate { cert_id: cert.id.clone() });
                 }

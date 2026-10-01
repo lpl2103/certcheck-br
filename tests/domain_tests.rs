@@ -45,6 +45,7 @@ fn test_certificate_validity_calculations() {
         identity: IcpBrasilIdentity::default(),
         has_private_key: true,
         is_hardware_backed: false,
+        raw_der: Vec::new(),
     };
 
     assert!(cert.is_currently_valid(now));
@@ -252,6 +253,7 @@ fn test_report_json_serialization() {
         },
         has_private_key: true,
         is_hardware_backed: false,
+        raw_der: Vec::new(),
     };
 
     let mut val = ValidationResult::new();
@@ -380,5 +382,86 @@ fn test_find_local_certificates() {
     }
     assert!(certs.len() >= 4, "Deve encontrar pelo menos os 4 arquivos de teste na raiz");
 }
+
+#[test]
+fn test_simulate_load_certificate_command() {
+    let certs = certcheck_br::gui::certificates::find_local_certificates();
+    for path in certs {
+        println!("\nTesting path: {:?}", path);
+        let bytes = std::fs::read(&path).expect("read failed");
+        let res = certcheck_br::certificate::windows_store::import_pfx_certificates(
+            &bytes,
+            None,
+            &path.display().to_string(),
+        );
+        match res {
+            Ok(c_list) => {
+                println!("SUCCESS: imported {} certs from {:?}", c_list.len(), path.file_name().unwrap());
+                for c in &c_list {
+                    println!("  Cert ID: {} | CN: {} | has_pk: {}", c.id, c.subject.clean_name(), c.has_private_key);
+                }
+            }
+            Err(e) => {
+                println!("ERROR: failed to import {:?}: {:?}", path.file_name().unwrap(), e);
+                panic!("Failed to import {:?}", path);
+            }
+        }
+    }
+}
+
+#[test]
+fn test_app_load_local_certs_in_gui_state() {
+    let log_buffer = std::sync::Arc::new(certcheck_br::logging::MemoryLogBuffer::new(100));
+    let mut state = certcheck_br::app::AppState::new(log_buffer);
+    let (cmd_tx, _cmd_rx) = crossbeam_channel::unbounded();
+
+    let local_certs = certcheck_br::gui::certificates::find_local_certificates();
+    assert!(!local_certs.is_empty());
+
+    // Simula o clique em carregar o primeiro certificado
+    let p = &local_certs[0];
+    let bytes = std::fs::read(p).unwrap();
+    let certs = certcheck_br::certificate::windows_store::import_pfx_certificates(&bytes, None, &p.display().to_string()).unwrap();
+    for cert in certs {
+        let id = cert.id.clone();
+        state.certificates.retain(|c| c.id != id);
+        state.certificates.push(cert);
+        state.selected_cert_id = Some(id);
+    }
+
+    assert!(!state.certificates.is_empty());
+    assert!(state.selected_certificate().is_some());
+
+    // Agora testa se a interface renderiza sem pânico
+    let ctx = egui::Context::default();
+    let _ = ctx.run(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            certcheck_br::gui::details::render_certificate_details(ui, &mut state, &cmd_tx);
+        });
+        egui::SidePanel::left("sidebar").show(ctx, |ui| {
+            certcheck_br::gui::certificates::render_certificates_sidebar(ui, &mut state, &cmd_tx);
+        });
+    });
+
+    println!("GUI renderizou com sucesso! Cert selecionado: {:?}", state.selected_certificate().unwrap().subject.clean_name());
+}
+
+#[test]
+fn test_raw_der_presence_and_windows_viewer() {
+    let local_certs = certcheck_br::gui::certificates::find_local_certificates();
+    assert!(!local_certs.is_empty());
+
+    let p = &local_certs[0];
+    let bytes = std::fs::read(p).unwrap();
+    let certs = certcheck_br::certificate::windows_store::import_pfx_certificates(&bytes, None, &p.display().to_string()).unwrap();
+    assert!(!certs.is_empty());
+
+    for c in &certs {
+        assert!(!c.raw_der.is_empty(), "raw_der deve estar preenchido para o certificado {}", c.id);
+        // Garante que o cabeçalho DER ASN.1 SEQUENCE (0x30) está presente
+        assert_eq!(c.raw_der[0], 0x30, "Certificado DER deve iniciar com tag SEQUENCE (0x30)");
+    }
+}
+
 
 
