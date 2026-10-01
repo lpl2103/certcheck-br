@@ -14,6 +14,8 @@ const CERT_KEY_PROV_INFO_PROP_ID: u32 = 2;
 const CERT_KEY_SPEC_PROP_ID: u32 = 6;
 const CRYPT_EXPORTABLE: u32 = 0x00000001;
 const PKCS12_NO_PERSIST_KEY: u32 = 0x00008000;
+const PKCS12_ALWAYS_CNG_KSP: u32 = 0x00000200;
+const PKCS12_ONLY_CERTIFICATES: u32 = 0x00000400;
 
 #[repr(C)]
 struct CryptDataBlob {
@@ -308,9 +310,12 @@ pub fn import_pfx_certificates(
     // Tenta abrir o container PKCS#12 testando combinações de flags
     let flag_combinations = [
         CRYPT_EXPORTABLE | PKCS12_NO_PERSIST_KEY,
+        PKCS12_ALWAYS_CNG_KSP | PKCS12_NO_PERSIST_KEY,
+        PKCS12_ALWAYS_CNG_KSP,
         PKCS12_NO_PERSIST_KEY,
         CRYPT_EXPORTABLE,
         0,
+        PKCS12_ONLY_CERTIFICATES,
     ];
 
     let mut h_store: *mut c_void = std::ptr::null_mut();

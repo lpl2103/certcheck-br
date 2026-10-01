@@ -5,6 +5,7 @@ pub mod certificates;
 pub mod dashboard;
 pub mod details;
 pub mod diagnostics;
+pub mod file_dialog;
 pub mod revocation;
 pub mod settings;
 pub mod signature;
@@ -92,12 +93,17 @@ impl CertCheckApp {
                 }
                 AppEvent::OperationError(err) => {
                     tracing::error!("Erro operacional [{}]: {}", err.category() as u8, err);
-                    self.state.last_error_message = Some(format!("{}", err));
+                    let err_str = format!("{}", err);
+                    self.state.last_error_message = Some(err_str.clone());
+                    if let Some(ref mut prompt) = self.state.password_prompt {
+                        prompt.error_msg = Some(err_str);
+                    }
                 }
                 AppEvent::PasswordRequired { path, reason } => {
+                    let prev_input = self.state.password_prompt.as_ref().map(|p| p.password_input.clone()).unwrap_or_default();
                     self.state.password_prompt = Some(crate::app::PasswordPrompt {
                         file_path: path,
-                        password_input: String::new(),
+                        password_input: prev_input,
                         error_msg: Some(reason),
                     });
                 }
@@ -144,6 +150,23 @@ impl App for CertCheckApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Processa eventos assíncronos
         self.handle_events(ctx);
+
+        // Processa arquivos arrastados e soltos na janela (Drag & Drop nativo)
+        let dropped = ctx.input(|i| i.raw.dropped_files.clone());
+        if !dropped.is_empty() {
+            for file in dropped {
+                if let Some(path) = file.path {
+                    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+                    if matches!(ext.as_str(), "pfx" | "p12" | "cer" | "crt" | "pem") {
+                        self.state.last_error_message = None;
+                        let _ = self.command_sender.send(AppCommand::LoadCertificateFile {
+                            path,
+                            password: None,
+                        });
+                    }
+                }
+            }
+        }
 
         let colors = ThemeColors::for_mode(self.state.theme_mode);
 
@@ -287,6 +310,42 @@ impl App for CertCheckApp {
 
         // Diálogo modal de nova versão disponível
         render_update_dialog(ctx, &mut self.state, &self.command_sender);
+
+        // Overlay visual interativo de Drag & Drop quando o usuário sobrevoa um arquivo na janela
+        let has_hovered = ctx.input(|i| !i.raw.hovered_files.is_empty());
+        if has_hovered {
+            egui::Area::new(egui::Id::new("drag_drop_hover_overlay"))
+                .order(egui::Order::Foreground)
+                .interactable(false)
+                .show(ctx, |ui| {
+                    let screen = ctx.screen_rect();
+                    ui.painter().rect_filled(screen, 0.0, egui::Color32::from_black_alpha(150));
+                    ui.painter().rect_stroke(
+                        screen.shrink(18.0),
+                        egui::CornerRadius::same(12),
+                        egui::Stroke::new(3.0_f32, colors.accent),
+                        egui::StrokeKind::Middle,
+                    );
+                    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(screen), |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(screen.height() / 2.0 - 50.0);
+                            ui.label(RichText::new("📥").size(52.0));
+                            ui.add_space(6.0);
+                            ui.label(
+                                RichText::new("Solte o Certificado Digital Aqui")
+                                    .size(20.0)
+                                    .color(egui::Color32::WHITE)
+                                    .strong(),
+                            );
+                            ui.label(
+                                RichText::new("Formatos aceitos: .pfx, .p12, .cer, .crt, .pem (A1)")
+                                    .size(13.0)
+                                    .color(egui::Color32::LIGHT_GRAY),
+                            );
+                        });
+                    });
+                });
+        }
     }
 }
 
@@ -381,6 +440,14 @@ fn render_password_dialog(
                 close_dialog = true;
             }
 
+            if state.is_busy {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(RichText::new("Verificando credenciais e descriptografando...").size(12.0).color(colors.info));
+                });
+            }
+
             ui.add_space(12.0);
             ui.separator();
             ui.add_space(6.0);
@@ -400,7 +467,7 @@ fn render_password_dialog(
                     .fill(colors.accent)
                     .corner_radius(egui::CornerRadius::same(6));
 
-                    if ui.add(confirm_btn).clicked() {
+                    if ui.add_enabled(!state.is_busy, confirm_btn).clicked() {
                         submit_password = true;
                     }
                 });

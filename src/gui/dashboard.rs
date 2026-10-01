@@ -1,26 +1,16 @@
 //! Visualização de resumo técnico (Dashboard) e status final de conformidade com emojis e estilo Fluent.
 
-use crate::app::{AppState, ThemeMode};
+use crate::app::{AppCommand, AppState, ThemeMode};
 use crate::gui::theme::{render_status_badge, ThemeColors};
 use crate::validation::{CheckCategory, CheckStatus, OverallStatus};
+use crossbeam_channel::Sender;
 use egui::{Color32, CornerRadius, Frame, Margin, RichText, Stroke, Ui};
 
-pub fn render_dashboard(ui: &mut Ui, state: &mut AppState) {
+pub fn render_dashboard(ui: &mut Ui, state: &mut AppState, command_sender: &Sender<AppCommand>) {
     let colors = ThemeColors::for_mode(state.theme_mode);
 
     let Some(cert) = state.selected_certificate().cloned() else {
-        ui.vertical_centered(|ui| {
-            ui.add_space(60.0);
-            ui.label(RichText::new("🔍").size(40.0));
-            ui.add_space(6.0);
-            ui.label(RichText::new("Nenhum certificado selecionado").size(18.0).color(colors.neutral).strong());
-            ui.add_space(6.0);
-            ui.label(
-                RichText::new("Selecione um certificado na barra lateral à esquerda ou clique em '🔍 Procurar A1 no Windows'.")
-                    .size(13.5)
-                    .color(colors.neutral),
-            );
-        });
+        render_empty_dashboard(ui, state, command_sender, &colors);
         return;
     };
 
@@ -256,4 +246,138 @@ fn render_compliance_card(
                     }
                 });
         });
+}
+
+fn render_empty_dashboard(
+    ui: &mut Ui,
+    state: &AppState,
+    command_sender: &Sender<AppCommand>,
+    colors: &ThemeColors,
+) {
+    let local_certs = crate::gui::certificates::find_local_certificates();
+
+    ui.vertical_centered(|ui| {
+        ui.add_space(30.0);
+        ui.label(RichText::new("🛡").size(48.0));
+        ui.add_space(8.0);
+        ui.label(
+            RichText::new("CertCheck BR — Central de Diagnóstico")
+                .size(20.0)
+                .strong()
+                .color(colors.info),
+        );
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new("Análise técnica de conformidade X.509, DOC-ICP-04, validade temporal e chaves A1/A3.")
+                .size(13.0)
+                .color(colors.neutral),
+        );
+        ui.add_space(16.0);
+
+        ui.horizontal(|ui| {
+            ui.add_space((ui.available_width() - 440.0).max(0.0) / 2.0);
+            let btn_a1 = egui::Button::new(
+                RichText::new("🔍 Procurar A1 no Windows")
+                    .size(13.5)
+                    .strong()
+                    .color(Color32::WHITE),
+            )
+            .fill(colors.accent)
+            .corner_radius(CornerRadius::same(6))
+            .min_size(egui::vec2(210.0, 34.0));
+
+            if ui.add(btn_a1).clicked() {
+                let _ = command_sender.send(AppCommand::RefreshWindowsStore);
+            }
+
+            ui.add_space(8.0);
+
+            let btn_file = egui::Button::new(
+                RichText::new("📂 Abrir Arquivo")
+                    .size(13.5)
+                    .strong(),
+            )
+            .corner_radius(CornerRadius::same(6))
+            .min_size(egui::vec2(210.0, 34.0));
+
+            if ui.add(btn_file).clicked() {
+                let sender = command_sender.clone();
+                let ctx = ui.ctx().clone();
+                std::thread::spawn(move || {
+                    if let Some(path) = crate::gui::file_dialog::pick_certificate_file() {
+                        let _ = sender.send(AppCommand::LoadCertificateFile {
+                            path,
+                            password: None,
+                        });
+                        ctx.request_repaint();
+                    }
+                });
+            }
+        });
+
+        ui.add_space(16.0);
+
+        if !local_certs.is_empty() {
+            Frame::NONE
+                .fill(colors.card_bg)
+                .corner_radius(CornerRadius::same(10))
+                .stroke(Stroke::new(1.0_f32, colors.border))
+                .inner_margin(Margin::same(16))
+                .show(ui, |ui| {
+                    ui.set_max_width(620.0);
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format!("📁 Certificados de Teste Encontrados na Pasta ({})", local_certs.len()))
+                                .strong()
+                                .size(14.0),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let load_all_btn = egui::Button::new(
+                                RichText::new("⚡ Carregar Todos").strong().color(Color32::WHITE).size(12.0),
+                            )
+                            .fill(colors.pass)
+                            .corner_radius(CornerRadius::same(6));
+
+                            if ui.add(load_all_btn).clicked() {
+                                for p in &local_certs {
+                                    let _ = command_sender.send(AppCommand::LoadCertificateFile {
+                                        path: p.clone(),
+                                        password: None,
+                                    });
+                                }
+                            }
+                        });
+                    });
+
+                    ui.add_space(6.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+
+                    for path in &local_certs {
+                        let file_name = path.file_name().and_then(|f| f.to_str()).unwrap_or("certificado");
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("📜").size(14.0));
+                            ui.label(RichText::new(file_name).size(12.5).strong());
+
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let btn = egui::Button::new(RichText::new("🔓 Abrir").size(11.5));
+                                if ui.add(btn).clicked() {
+                                    let _ = command_sender.send(AppCommand::LoadCertificateFile {
+                                        path: path.clone(),
+                                        password: None,
+                                    });
+                                }
+                            });
+                        });
+                        ui.add_space(4.0);
+                    }
+                });
+        } else if !state.certificates.is_empty() {
+            ui.label(
+                RichText::new("👈 Selecione um certificado na barra lateral à esquerda para visualizar seu diagnóstico detalhado.")
+                    .size(13.5)
+                    .color(colors.neutral),
+            );
+        }
+    });
 }

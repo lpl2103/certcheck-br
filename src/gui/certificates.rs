@@ -68,20 +68,7 @@ pub fn render_certificates_sidebar(
             state.last_error_message = None;
 
             std::thread::spawn(move || {
-                let dialog = rfd::FileDialog::new()
-                    .add_filter(
-                        "Certificados Digitais (*.pfx, *.p12, *.cer, *.crt, *.pem)",
-                        &[
-                            "pfx", "p12", "cer", "crt", "pem",
-                            "PFX", "P12", "CER", "CRT", "PEM",
-                        ],
-                    )
-                    .add_filter("Arquivos PKCS#12 (*.pfx, *.p12)", &["pfx", "p12", "PFX", "P12"])
-                    .add_filter("Certificados X.509 (*.cer, *.crt, *.pem)", &["cer", "crt", "pem", "CER", "CRT", "PEM"])
-                    .add_filter("Todos os Arquivos (*.*)", &["*"])
-                    .set_title("Selecionar Certificado Digital");
-
-                if let Some(path) = dialog.pick_file() {
+                if let Some(path) = crate::gui::file_dialog::pick_certificate_file() {
                     let _ = sender.send(AppCommand::LoadCertificateFile {
                         path,
                         password: None,
@@ -208,26 +195,64 @@ pub fn render_certificates_sidebar(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             if state.certificates.is_empty() {
+                let local_certs = find_local_certificates();
+
                 // Estado Vazio: Nenhum certificado carregado
                 Frame::NONE
                     .fill(colors.card_bg)
                     .corner_radius(CornerRadius::same(8))
                     .stroke(Stroke::new(1.0_f32, colors.border))
-                    .inner_margin(Margin::same(16))
+                    .inner_margin(Margin::same(14))
                     .show(ui, |ui| {
                         ui.vertical_centered(|ui| {
-                            ui.add_space(12.0);
-                            ui.label(RichText::new("📭").size(36.0));
                             ui.add_space(6.0);
-                            ui.label(RichText::new("Nenhum certificado carregado").strong().size(15.0));
-                            ui.add_space(6.0);
+                            ui.label(RichText::new("📭").size(32.0));
+                            ui.add_space(4.0);
+                            ui.label(RichText::new("Nenhum certificado carregado").strong().size(14.5));
+                            ui.add_space(4.0);
                             ui.label(
-                                RichText::new("Clique no botão acima para varrer o computador ou abra um arquivo .pfx / .cer.")
+                                RichText::new("Use os botões acima, arraste arquivos aqui ou abra um certificado local:")
                                     .color(colors.neutral)
-                                    .size(13.0),
+                                    .size(12.0),
                             );
-                            ui.add_space(12.0);
+                            ui.add_space(6.0);
                         });
+
+                        if !local_certs.is_empty() {
+                            ui.separator();
+                            ui.add_space(6.0);
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new("📂 Arquivos na pasta:").strong().size(12.0));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.button(RichText::new("⚡ Carregar Todos").strong().size(11.5)).clicked() {
+                                        for p in &local_certs {
+                                            let _ = command_sender.send(AppCommand::LoadCertificateFile {
+                                                path: p.clone(),
+                                                password: None,
+                                            });
+                                        }
+                                    }
+                                });
+                            });
+                            ui.add_space(4.0);
+
+                            for path in &local_certs {
+                                let file_name = path.file_name().and_then(|f| f.to_str()).unwrap_or("cert");
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new("📄").size(12.0));
+                                    let btn = egui::Button::new(
+                                        RichText::new(file_name).size(11.5)
+                                    ).truncate();
+                                    if ui.add(btn).on_hover_text("Clique para carregar e diagnosticar este arquivo").clicked() {
+                                        let _ = command_sender.send(AppCommand::LoadCertificateFile {
+                                            path: path.clone(),
+                                            password: None,
+                                        });
+                                    }
+                                });
+                                ui.add_space(2.0);
+                            }
+                        }
                     });
                 return;
             }
@@ -391,4 +416,40 @@ pub fn render_certificates_sidebar(
                 ui.add_space(8.0);
             }
         });
+}
+
+/// Varre diretórios locais (pasta de execução e raiz do projeto) procurando certificados digitais.
+pub fn find_local_certificates() -> Vec<std::path::PathBuf> {
+    let mut paths = Vec::new();
+    let mut search_dirs = Vec::new();
+
+    if let Ok(cur) = std::env::current_dir() {
+        search_dirs.push(cur);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let p = parent.to_path_buf();
+            if !search_dirs.contains(&p) {
+                search_dirs.push(p);
+            }
+        }
+    }
+
+    for dir in search_dirs {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_file() {
+                    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+                    if matches!(ext.as_str(), "pfx" | "p12" | "cer" | "crt" | "pem") {
+                        if !paths.contains(&p) {
+                            paths.push(p);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    paths.sort();
+    paths
 }

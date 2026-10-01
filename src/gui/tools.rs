@@ -144,11 +144,7 @@ pub fn render_tools_tab(
                             );
                             let sender = command_sender.clone();
                             std::thread::spawn(move || {
-                                let dialog = rfd::FileDialog::new()
-                                    .set_file_name(&default_filename)
-                                    .add_filter("Documento HTML (*.html)", &["html"]);
-
-                                if let Some(dest) = dialog.save_file() {
+                                if let Some(dest) = crate::gui::file_dialog::save_html_report(&default_filename) {
                                     let _ = sender.send(AppCommand::ExportReportHtml {
                                         cert_id: cert.id.clone(),
                                         destination: dest.clone(),
@@ -363,9 +359,7 @@ pub fn render_tools_tab(
                         if let Some(cert) = state.selected_certificate().cloned() {
                             let sender = command_sender.clone();
                             std::thread::spawn(move || {
-                                let dialog = rfd::FileDialog::new()
-                                    .set_title("Selecione um arquivo para teste de assinatura criptográfica");
-                                if let Some(path) = dialog.pick_file() {
+                                if let Some(path) = crate::gui::file_dialog::pick_file_to_sign() {
                                     let _ = sender.send(AppCommand::SignTestFile {
                                         cert_id: cert.id.clone(),
                                         file_path: path,

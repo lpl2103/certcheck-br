@@ -371,4 +371,14 @@ fn test_check_for_updates_runs() {
     println!("Update info: {:?}", info);
 }
 
+#[test]
+fn test_find_local_certificates() {
+    let certs = certcheck_br::gui::certificates::find_local_certificates();
+    println!("Certificados locais encontrados: {}", certs.len());
+    for c in &certs {
+        println!("  - {:?}", c.file_name().unwrap());
+    }
+    assert!(certs.len() >= 4, "Deve encontrar pelo menos os 4 arquivos de teste na raiz");
+}
+
 

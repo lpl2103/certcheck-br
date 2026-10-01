@@ -89,7 +89,7 @@ pub fn render_certificate_details(
 
     // Conteúdo da Aba Selecionada
     match state.active_tab {
-        DetailTab::Resumo => render_dashboard(ui, state),
+        DetailTab::Resumo => render_dashboard(ui, state, command_sender),
         DetailTab::Identidade => render_identity_tab(ui, state),
         DetailTab::Chave => render_key_tab(ui, state),
         DetailTab::Extensoes => render_extensions_tab(ui, state),
