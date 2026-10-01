@@ -334,3 +334,27 @@ fn test_real_pfx_import_and_identity_extraction() {
         println!("Certificado: {} | CNPJ: {:?} | CPF: {:?} | Holder: {:?}", clean_title, cnpj, cert.identity.formatted_cpf(), holder);
     }
 }
+
+#[test]
+fn test_pfx_import_without_password() {
+    use certcheck_br::certificate::windows_store::import_pfx_certificates;
+
+    let test_files = [
+        "CD_Armindo_Senha12345678.pfx",
+        "2026 AFC COMERCIO DE ROUPAS LTDA_55902817000147.pfx",
+        "certificadoAF.pfx",
+        "certificadoSkyler.pfx",
+    ];
+
+    for file_name in test_files {
+        let path = std::path::Path::new(file_name);
+        if !path.exists() { continue; }
+        let bytes = std::fs::read(path).unwrap();
+        let res = import_pfx_certificates(&bytes, None, file_name);
+        println!("File: {} -> Result: {:?}", file_name, res.is_ok());
+        if let Err(ref e) = res {
+            println!("Error: {:?}", e);
+        }
+    }
+}
+

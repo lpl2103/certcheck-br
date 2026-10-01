@@ -83,6 +83,12 @@ extern "system" {
     ) -> i32;
 }
 
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetLastError() -> u32;
+}
+
+
 /// Encontra e carrega todos os certificados instalados no repositório pessoal do Windows (`CurrentUser\MY`).
 ///
 /// Prioriza certificados que possuam chave privada associada (A1/A3).
@@ -298,18 +304,31 @@ pub fn import_pfx_certificates(
     };
 
     let wide_pw: Vec<u16> = valid_pw.encode_utf16().chain(std::iter::once(0)).collect();
-    let h_store = unsafe {
-        PFXImportCertStore(
-            &blob,
-            wide_pw.as_ptr(),
-            CRYPT_EXPORTABLE | PKCS12_NO_PERSIST_KEY,
-        )
-    };
+
+    // Tenta abrir o container PKCS#12 testando combinações de flags
+    let flag_combinations = [
+        CRYPT_EXPORTABLE | PKCS12_NO_PERSIST_KEY,
+        PKCS12_NO_PERSIST_KEY,
+        CRYPT_EXPORTABLE,
+        0,
+    ];
+
+    let mut h_store: *mut c_void = std::ptr::null_mut();
+    for &flags in &flag_combinations {
+        h_store = unsafe { PFXImportCertStore(&blob, wide_pw.as_ptr(), flags) };
+        if !h_store.is_null() {
+            break;
+        }
+    }
 
     if h_store.is_null() {
+        let err_code = unsafe { GetLastError() };
         return Err(CertCheckError::ProviderError {
             provider: "WindowsCryptoAPI".to_string(),
-            reason: "Falha ao abrir container PKCS#12 (.PFX) via PFXImportCertStore.".to_string(),
+            reason: format!(
+                "Falha ao abrir container PKCS#12 (.PFX) via PFXImportCertStore (Código Win32: 0x{:08X}).",
+                err_code
+            ),
         });
     }
 
@@ -331,19 +350,25 @@ pub fn import_pfx_certificates(
             std::slice::from_raw_parts(ctx.pb_cert_encoded, ctx.cb_cert_encoded as usize)
         };
 
-        let mut pcb_data = 0u32;
-        let has_pk = unsafe {
-            CertGetCertificateContextProperty(
-                p_context,
-                CERT_KEY_PROV_INFO_PROP_ID,
-                std::ptr::null_mut(),
-                &mut pcb_data,
-            ) != 0
-        };
+        let (mut has_pk, is_hw) = unsafe { check_private_key_info(p_context) };
+        if !has_pk {
+            let mut cb = 0u32;
+            let has_prov = unsafe {
+                CertGetCertificateContextProperty(
+                    p_context,
+                    CERT_KEY_PROV_INFO_PROP_ID,
+                    std::ptr::null_mut(),
+                    &mut cb,
+                ) != 0
+            };
+            if has_prov {
+                has_pk = true;
+            }
+        }
 
         let source = CertificateSource::FilePfx(file_path.to_string());
 
-        match parse_x509_der(der_bytes, source, has_pk, false) {
+        match parse_x509_der(der_bytes, source, has_pk, is_hw) {
             Ok(cert_info) => certificates.push(cert_info),
             Err(e) => tracing::warn!("Aviso ao analisar certificado extraído do PFX: {}", e),
         }

@@ -125,6 +125,8 @@ pub struct AppState {
     pub connectivity_results: Vec<crate::tools::ServiceEndpointTest>,
     pub file_signing_result: Option<crate::crypto::SignatureTestResult>,
     pub tool_feedback_message: Option<(bool, String)>,
+    pub last_error_message: Option<String>,
+    pub last_status_message: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -168,6 +170,8 @@ impl AppState {
             connectivity_results: Vec::new(),
             file_signing_result: None,
             tool_feedback_message: None,
+            last_error_message: None,
+            last_status_message: None,
         }
     }
 

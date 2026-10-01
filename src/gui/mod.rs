@@ -48,8 +48,10 @@ impl CertCheckApp {
     }
 
     /// Processa eventos emitidos pelos workers em background.
-    fn handle_events(&mut self) {
+    fn handle_events(&mut self, ctx: &egui::Context) {
+        let mut got_event = false;
         while let Ok(event) = self.event_receiver.try_recv() {
+            got_event = true;
             match event {
                 AppEvent::BusyStateChanged { is_busy, message } => {
                     self.state.is_busy = is_busy;
@@ -68,6 +70,7 @@ impl CertCheckApp {
                     self.state.certificates.push(*cert);
                     self.state.selected_cert_id = Some(id);
                     self.state.password_prompt = None;
+                    self.state.last_error_message = None;
                 }
                 AppEvent::ValidationCompleted { cert_id, result } => {
                     self.state.validation_results.insert(cert_id, result);
@@ -83,6 +86,7 @@ impl CertCheckApp {
                 }
                 AppEvent::OperationError(err) => {
                     tracing::error!("Erro operacional [{}]: {}", err.category() as u8, err);
+                    self.state.last_error_message = Some(format!("{}", err));
                 }
                 AppEvent::PasswordRequired { path, reason } => {
                     self.state.password_prompt = Some(crate::app::PasswordPrompt {
@@ -93,6 +97,7 @@ impl CertCheckApp {
                 }
                 AppEvent::StatusNotification(msg) => {
                     tracing::info!("{}", msg);
+                    self.state.last_status_message = Some(msg);
                 }
                 AppEvent::UpdateCheckCompleted(info) => {
                     if let Some(ref update) = info {
@@ -123,13 +128,16 @@ impl CertCheckApp {
                 }
             }
         }
+        if got_event {
+            ctx.request_repaint();
+        }
     }
 }
 
 impl App for CertCheckApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Processa eventos assíncronos
-        self.handle_events();
+        self.handle_events(ctx);
 
         let colors = ThemeColors::for_mode(self.state.theme_mode);
 
@@ -206,6 +214,26 @@ impl App for CertCheckApp {
                             .size(11.0)
                             .color(colors.info),
                     );
+                } else if let Some(ref err) = self.state.last_error_message {
+                    ui.separator();
+                    ui.label(
+                        RichText::new(format!("⚠ {}", err))
+                            .size(11.0)
+                            .color(colors.error),
+                    );
+                    if ui.small_button("✕").on_hover_text("Fechar aviso").clicked() {
+                        self.state.last_error_message = None;
+                    }
+                } else if let Some(ref msg) = self.state.last_status_message {
+                    ui.separator();
+                    ui.label(
+                        RichText::new(format!("ℹ {}", msg))
+                            .size(11.0)
+                            .color(colors.info),
+                    );
+                    if ui.small_button("✕").on_hover_text("Fechar mensagem").clicked() {
+                        self.state.last_status_message = None;
+                    }
                 } else {
                     ui.separator();
                     ui.label(
@@ -270,12 +298,25 @@ fn render_password_dialog(
     let mut close_dialog = false;
     let mut submit_password = false;
 
+    // Fundo escuro semitransparente (Modal Backdrop)
+    egui::Area::new(egui::Id::new("password_modal_backdrop"))
+        .order(egui::Order::Middle)
+        .interactable(true)
+        .show(ctx, |ui| {
+            ui.painter().rect_filled(
+                ctx.screen_rect(),
+                0.0,
+                egui::Color32::from_black_alpha(160),
+            );
+        });
+
     egui::Window::new(RichText::new("🔑 Senha do Certificado Digital").strong())
+        .id(egui::Id::new("password_dialog_window"))
         .collapsible(false)
         .resizable(false)
-        .pivot(egui::Align2::CENTER_CENTER)
-        .default_pos(ctx.screen_rect().center())
-        .default_width(400.0)
+        .order(egui::Order::Foreground)
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .default_width(420.0)
         .show(ctx, |ui| {
             ui.add_space(4.0);
             let file_name = prompt
@@ -321,11 +362,12 @@ fn render_password_dialog(
                     .desired_width(ui.available_width()),
             );
 
-            if prompt.password_input.is_empty() {
+            if prompt.password_input.is_empty() && !pw_field.has_focus() {
                 pw_field.request_focus();
             }
 
-            if pw_field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if enter_pressed && !prompt.password_input.is_empty() {
                 submit_password = true;
             }
 
@@ -360,14 +402,24 @@ fn render_password_dialog(
         });
 
     if submit_password {
+        state.last_error_message = None;
+        let file_name = prompt
+            .file_path
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or("certificado")
+            .to_string();
+        state.last_status_message = Some(format!("Descriptografando {}...", file_name));
         let _ = command_sender.send(AppCommand::LoadCertificateFile {
             path: prompt.file_path.clone(),
             password: Some(prompt.password_input.clone()),
         });
         prompt.error_msg = None;
         state.password_prompt = Some(prompt);
+        ctx.request_repaint();
     } else if close_dialog {
         state.password_prompt = None;
+        ctx.request_repaint();
     } else {
         state.password_prompt = Some(prompt);
     }
@@ -390,11 +442,24 @@ fn render_update_dialog(
     let colors = ThemeColors::for_mode(state.theme_mode);
     let mut close_dialog = false;
 
+    // Fundo escuro semitransparente (Modal Backdrop)
+    egui::Area::new(egui::Id::new("update_modal_backdrop"))
+        .order(egui::Order::Middle)
+        .interactable(true)
+        .show(ctx, |ui| {
+            ui.painter().rect_filled(
+                ctx.screen_rect(),
+                0.0,
+                egui::Color32::from_black_alpha(160),
+            );
+        });
+
     egui::Window::new(RichText::new("🚀 Nova Versão Disponível").strong())
+        .id(egui::Id::new("update_dialog_window"))
         .collapsible(false)
         .resizable(false)
-        .pivot(egui::Align2::CENTER_CENTER)
-        .default_pos(ctx.screen_rect().center())
+        .order(egui::Order::Foreground)
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .default_width(440.0)
         .show(ctx, |ui| {
             ui.add_space(4.0);

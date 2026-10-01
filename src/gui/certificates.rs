@@ -66,15 +66,29 @@ pub fn render_certificates_sidebar(
             let dialog = rfd::FileDialog::new()
                 .add_filter(
                     "Certificados Digitais (*.pfx, *.p12, *.cer, *.crt, *.pem)",
-                    &["pfx", "p12", "cer", "crt", "pem"],
+                    &[
+                        "pfx", "p12", "cer", "crt", "pem",
+                        "PFX", "P12", "CER", "CRT", "PEM",
+                    ],
                 )
+                .add_filter("Arquivos PKCS#12 (*.pfx, *.p12)", &["pfx", "p12", "PFX", "P12"])
+                .add_filter("Certificados X.509 (*.cer, *.crt, *.pem)", &["cer", "crt", "pem", "CER", "CRT", "PEM"])
+                .add_filter("Todos os Arquivos (*.*)", &["*"])
                 .set_title("Selecionar Certificado Digital");
 
             if let Some(path) = dialog.pick_file() {
+                let file_name = path
+                    .file_name()
+                    .and_then(|f| f.to_str())
+                    .unwrap_or("arquivo")
+                    .to_string();
+                state.last_error_message = None;
+                state.last_status_message = Some(format!("Carregando {}...", file_name));
                 let _ = command_sender.send(AppCommand::LoadCertificateFile {
                     path,
                     password: None,
                 });
+                ui.ctx().request_repaint();
             }
         }
 
@@ -84,6 +98,21 @@ pub fn render_certificates_sidebar(
             let _ = command_sender.send(AppCommand::DetectA3Hardware);
         }
     });
+
+    if let Some(ref err) = state.last_error_message {
+        ui.add_space(4.0);
+        Frame::NONE
+            .fill(colors.error.gamma_multiply(0.12))
+            .corner_radius(CornerRadius::same(6))
+            .stroke(Stroke::new(1.0_f32, colors.error))
+            .inner_margin(Margin::symmetric(8, 6))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("⚠").color(colors.error).strong().size(12.0));
+                    ui.label(RichText::new(err).color(colors.error).size(11.5));
+                });
+            });
+    }
 
     ui.add_space(8.0);
 

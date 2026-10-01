@@ -37,12 +37,6 @@ fn main() -> eframe::Result {
         crossbeam_channel::unbounded();
     let (evt_tx, evt_rx): (Sender<AppEvent>, Receiver<AppEvent>) = crossbeam_channel::unbounded();
 
-    // 4. Inicia worker thread para processar comandos demorados em background
-    let worker_evt_tx = evt_tx.clone();
-    thread::spawn(move || {
-        background_worker(cmd_rx, worker_evt_tx);
-    });
-
     // Dispara verificação assíncrona de atualizações no GitHub ao iniciar
     let _ = cmd_tx.send(AppCommand::CheckForUpdates);
 
@@ -76,12 +70,37 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "CertCheck BR",
         native_options,
-        Box::new(|cc| Ok(Box::new(CertCheckApp::new(state, cmd_tx, evt_rx, cc)))),
+        Box::new(move |cc| {
+            let worker_evt_tx = evt_tx.clone();
+            let egui_ctx = cc.egui_ctx.clone();
+            thread::spawn(move || {
+                background_worker(cmd_rx, worker_evt_tx, egui_ctx);
+            });
+            Ok(Box::new(CertCheckApp::new(state, cmd_tx, evt_rx, cc)))
+        }),
     )
 }
 
+/// Envoltório de envio de eventos que acorda o loop reativo do egui imediatamente em cada mensagem.
+#[derive(Clone)]
+struct EventSender {
+    tx: Sender<AppEvent>,
+    ctx: egui::Context,
+}
+
+impl EventSender {
+    fn send(&self, event: AppEvent) {
+        let _ = self.tx.send(event);
+        self.ctx.request_repaint();
+    }
+}
+
 /// Worker em background para isolar chamadas de hardware, rede e criptografia da thread da GUI.
-fn background_worker(cmd_rx: Receiver<AppCommand>, evt_tx: Sender<AppEvent>) {
+fn background_worker(cmd_rx: Receiver<AppCommand>, evt_tx_raw: Sender<AppEvent>, egui_ctx: egui::Context) {
+    let evt_tx = EventSender {
+        tx: evt_tx_raw,
+        ctx: egui_ctx,
+    };
     let mut loaded_certs: std::collections::HashMap<String, certcheck_br::certificate::CertificateInfo> =
         std::collections::HashMap::new();
 
@@ -153,37 +172,69 @@ fn background_worker(cmd_rx: Receiver<AppCommand>, evt_tx: Sender<AppEvent>) {
 
                 let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
                 if ext == "cer" || ext == "crt" || ext == "pem" {
-                    if let Ok(bytes) = std::fs::read(&path) {
-                        let der = if bytes.starts_with(b"-----BEGIN") {
-                            x509_parser::pem::parse_x509_pem(&bytes)
-                                .map(|(_, pem)| pem.contents)
-                                .unwrap_or_else(|_| bytes.clone())
-                        } else {
-                            bytes.clone()
-                        };
+                    match std::fs::read(&path) {
+                        Ok(bytes) => {
+                            let der = if bytes.starts_with(b"-----BEGIN") {
+                                x509_parser::pem::parse_x509_pem(&bytes)
+                                    .map(|(_, pem)| pem.contents)
+                                    .unwrap_or_else(|_| bytes.clone())
+                            } else {
+                                bytes.clone()
+                            };
 
-                        let source = match ext.as_str() {
-                            "pem" => CertificateSource::FilePem(path.display().to_string()),
-                            "cer" => CertificateSource::FileCer(path.display().to_string()),
-                            _ => CertificateSource::FileCrt(path.display().to_string()),
-                        };
+                            let source = match ext.as_str() {
+                                "pem" => CertificateSource::FilePem(path.display().to_string()),
+                                "cer" => CertificateSource::FileCer(path.display().to_string()),
+                                _ => CertificateSource::FileCrt(path.display().to_string()),
+                            };
 
-                        if let Ok(cert) = certcheck_br::certificate::parser::parse_x509_der(&der, source, false, false) {
-                            let cert_id = cert.id.clone();
-                            let val = certcheck_br::validation::validate_certificate_real(&cert);
-                            loaded_certs.insert(cert_id.clone(), cert.clone());
-                            let _ = evt_tx.send(AppEvent::CertificateAdded(Box::new(cert)));
-                            let _ = evt_tx.send(AppEvent::BusyStateChanged {
-                                is_busy: false,
-                                message: String::new(),
-                            });
-                            let _ = evt_tx.send(AppEvent::ValidationCompleted {
-                                cert_id,
-                                result: val,
-                            });
-                            continue;
+                            match certcheck_br::certificate::parser::parse_x509_der(&der, source, false, false) {
+                                Ok(cert) => {
+                                    let cert_id = cert.id.clone();
+                                    let cn = cert.subject.clean_name().to_string();
+                                    let val = certcheck_br::validation::validate_certificate_real(&cert);
+                                    loaded_certs.insert(cert_id.clone(), cert.clone());
+                                    let _ = evt_tx.send(AppEvent::CertificateAdded(Box::new(cert)));
+                                    let _ = evt_tx.send(AppEvent::BusyStateChanged {
+                                        is_busy: false,
+                                        message: String::new(),
+                                    });
+                                    let _ = evt_tx.send(AppEvent::ValidationCompleted {
+                                        cert_id,
+                                        result: val,
+                                    });
+                                    let _ = evt_tx.send(AppEvent::StatusNotification(format!(
+                                        "Certificado carregado: {}",
+                                        cn
+                                    )));
+                                    continue;
+                                }
+                                Err(e) => {
+                                    tracing::error!("Erro ao analisar certificado X.509: {}", e);
+                                    let _ = evt_tx.send(AppEvent::OperationError(e));
+                                    let _ = evt_tx.send(AppEvent::StatusNotification(format!(
+                                        "Falha ao interpretar {} como certificado X.509.",
+                                        file_name
+                                    )));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Erro ao ler arquivo {:?}: {}", path, e);
+                            let _ = evt_tx.send(AppEvent::OperationError(certcheck_br::error::CertCheckError::IoError(format!(
+                                "Erro ao ler {}: {}", file_name, e
+                            ))));
+                            let _ = evt_tx.send(AppEvent::StatusNotification(format!(
+                                "Erro ao abrir {}: {}",
+                                file_name, e
+                            )));
                         }
                     }
+                    let _ = evt_tx.send(AppEvent::BusyStateChanged {
+                        is_busy: false,
+                        message: String::new(),
+                    });
+                    continue;
                 }
 
                 // Arquivos PKCS#12 (.PFX / .P12)
@@ -237,21 +288,31 @@ fn background_worker(cmd_rx: Receiver<AppCommand>, evt_tx: Sender<AppEvent>) {
                             Err(e) => {
                                 tracing::error!("Erro ao importar PFX: {}", e);
                                 if matches!(e, certcheck_br::error::CertCheckError::InvalidPasswordOrCorruptPkcs12) {
+                                    let reason = if password.is_some() {
+                                        format!("Senha incorreta para {}. Por favor digite a senha correta:", file_name)
+                                    } else {
+                                        format!("O arquivo {} é protegido por senha. Informe a senha para abrir:", file_name)
+                                    };
                                     let _ = evt_tx.send(AppEvent::PasswordRequired {
                                         path: path.clone(),
-                                        reason: format!("O arquivo {} requer senha para abrir.", file_name),
+                                        reason: reason.clone(),
                                     });
+                                    let _ = evt_tx.send(AppEvent::StatusNotification(reason));
+                                } else {
+                                    let _ = evt_tx.send(AppEvent::OperationError(e));
+                                    let _ = evt_tx.send(AppEvent::StatusNotification(format!(
+                                        "Falha ao abrir {}: Verifique o arquivo e a senha.",
+                                        file_name
+                                    )));
                                 }
-                                let _ = evt_tx.send(AppEvent::OperationError(e));
-                                let _ = evt_tx.send(AppEvent::StatusNotification(format!(
-                                    "Falha ao abrir {}: Verifique a senha do arquivo.",
-                                    file_name
-                                )));
                             }
                         }
                     }
                     Err(e) => {
                         tracing::error!("Erro ao ler arquivo {:?}: {}", path, e);
+                        let _ = evt_tx.send(AppEvent::OperationError(certcheck_br::error::CertCheckError::IoError(format!(
+                            "Erro ao ler {}: {}", file_name, e
+                        ))));
                         let _ = evt_tx.send(AppEvent::StatusNotification(format!(
                             "Erro ao ler arquivo: {}",
                             e
