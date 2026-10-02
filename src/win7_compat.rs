@@ -128,6 +128,46 @@ pub static __imp_ProcessPrng: unsafe extern "system" fn(*mut u8, usize) -> i32 =
 // 3. WaitOnAddress, WakeByAddressAll, WakeByAddressSingle
 // =========================================================================
 
+static REAL_WAIT: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_WAKE_SINGLE: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_WAKE_ALL: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
+static SYNCH_INITIALIZED: AtomicBool = AtomicBool::new(false);
+
+unsafe fn init_synch_apis() {
+    if SYNCH_INITIALIZED.load(Ordering::Acquire) {
+        return;
+    }
+
+    // Tenta primeiro em kernel32.dll
+    let mut h_module = GetModuleHandleA(b"kernel32.dll\0".as_ptr());
+    let mut p_wait = if !h_module.is_null() {
+        GetProcAddress(h_module, b"WaitOnAddress\0".as_ptr())
+    } else {
+        std::ptr::null_mut()
+    };
+
+    // Se não estiver em kernel32.dll, carrega de api-ms-win-core-synch-l1-2-0.dll (Windows 8, 10, 11)
+    if p_wait.is_null() {
+        h_module = LoadLibraryA(b"api-ms-win-core-synch-l1-2-0.dll\0".as_ptr());
+        if !h_module.is_null() {
+            p_wait = GetProcAddress(h_module, b"WaitOnAddress\0".as_ptr());
+        }
+    }
+
+    if !h_module.is_null() && !p_wait.is_null() {
+        let p_wake_single = GetProcAddress(h_module, b"WakeByAddressSingle\0".as_ptr());
+        let p_wake_all = GetProcAddress(h_module, b"WakeByAddressAll\0".as_ptr());
+
+        if !p_wake_single.is_null() && !p_wake_all.is_null() {
+            REAL_WAIT.store(p_wait, Ordering::Release);
+            REAL_WAKE_SINGLE.store(p_wake_single, Ordering::Release);
+            REAL_WAKE_ALL.store(p_wake_all, Ordering::Release);
+        }
+    }
+
+    SYNCH_INITIALIZED.store(true, Ordering::Release);
+}
+
 #[no_mangle]
 pub unsafe extern "system" fn WaitOnAddress(
     address: *mut std::ffi::c_void,
@@ -135,32 +175,9 @@ pub unsafe extern "system" fn WaitOnAddress(
     address_size: usize,
     dw_milliseconds: u32,
 ) -> i32 {
-    static REAL_FN: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
-    static INITIALIZED: AtomicBool = AtomicBool::new(false);
+    init_synch_apis();
 
-    if !INITIALIZED.load(Ordering::Acquire) {
-        // Tenta kernel32.dll (Windows 8+)
-        let h_kernel32 = GetModuleHandleA(b"kernel32.dll\0".as_ptr());
-        if !h_kernel32.is_null() {
-            let proc = GetProcAddress(h_kernel32, b"WaitOnAddress\0".as_ptr());
-            if !proc.is_null() {
-                REAL_FN.store(proc, Ordering::Release);
-            }
-        }
-        // Se não estiver em kernel32, tenta api-ms-win-core-synch-l1-2-0.dll
-        if REAL_FN.load(Ordering::Relaxed).is_null() {
-            let h_synch = LoadLibraryA(b"api-ms-win-core-synch-l1-2-0.dll\0".as_ptr());
-            if !h_synch.is_null() {
-                let proc = GetProcAddress(h_synch, b"WaitOnAddress\0".as_ptr());
-                if !proc.is_null() {
-                    REAL_FN.store(proc, Ordering::Release);
-                }
-            }
-        }
-        INITIALIZED.store(true, Ordering::Release);
-    }
-
-    let real = REAL_FN.load(Ordering::Acquire);
+    let real = REAL_WAIT.load(Ordering::Acquire);
     if !real.is_null() {
         let f: unsafe extern "system" fn(*mut std::ffi::c_void, *mut std::ffi::c_void, usize, u32) -> i32 =
             std::mem::transmute(real);
@@ -181,21 +198,9 @@ pub static __imp_WaitOnAddress: unsafe extern "system" fn(
 
 #[no_mangle]
 pub unsafe extern "system" fn WakeByAddressSingle(address: *mut std::ffi::c_void) {
-    static REAL_FN: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
-    static INITIALIZED: AtomicBool = AtomicBool::new(false);
+    init_synch_apis();
 
-    if !INITIALIZED.load(Ordering::Acquire) {
-        let h_kernel32 = GetModuleHandleA(b"kernel32.dll\0".as_ptr());
-        if !h_kernel32.is_null() {
-            let proc = GetProcAddress(h_kernel32, b"WakeByAddressSingle\0".as_ptr());
-            if !proc.is_null() {
-                REAL_FN.store(proc, Ordering::Release);
-            }
-        }
-        INITIALIZED.store(true, Ordering::Release);
-    }
-
-    let real = REAL_FN.load(Ordering::Acquire);
+    let real = REAL_WAKE_SINGLE.load(Ordering::Acquire);
     if !real.is_null() {
         let f: unsafe extern "system" fn(*mut std::ffi::c_void) = std::mem::transmute(real);
         f(address);
@@ -210,21 +215,9 @@ pub static __imp_WakeByAddressSingle: unsafe extern "system" fn(*mut std::ffi::c
 
 #[no_mangle]
 pub unsafe extern "system" fn WakeByAddressAll(address: *mut std::ffi::c_void) {
-    static REAL_FN: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(std::ptr::null_mut());
-    static INITIALIZED: AtomicBool = AtomicBool::new(false);
+    init_synch_apis();
 
-    if !INITIALIZED.load(Ordering::Acquire) {
-        let h_kernel32 = GetModuleHandleA(b"kernel32.dll\0".as_ptr());
-        if !h_kernel32.is_null() {
-            let proc = GetProcAddress(h_kernel32, b"WakeByAddressAll\0".as_ptr());
-            if !proc.is_null() {
-                REAL_FN.store(proc, Ordering::Release);
-            }
-        }
-        INITIALIZED.store(true, Ordering::Release);
-    }
-
-    let real = REAL_FN.load(Ordering::Acquire);
+    let real = REAL_WAKE_ALL.load(Ordering::Acquire);
     if !real.is_null() {
         let f: unsafe extern "system" fn(*mut std::ffi::c_void) = std::mem::transmute(real);
         f(address);

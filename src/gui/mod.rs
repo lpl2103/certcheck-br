@@ -43,11 +43,14 @@ impl CertCheckApp {
 
         // Auto-carregamento imediato de certificados digitais da pasta local ao iniciar
         let local_certs = crate::gui::certificates::find_local_certificates();
-        for p in local_certs {
-            let _ = command_sender.send(AppCommand::LoadCertificateFile {
-                path: p,
-                password: None,
-            });
+        if !local_certs.is_empty() {
+            tracing::info!("Carregando automaticamente {} certificado(s) local(is)...", local_certs.len());
+            for p in &local_certs {
+                let _ = command_sender.send(AppCommand::LoadCertificateFile {
+                    path: p.clone(),
+                    password: None,
+                });
+            }
         }
 
         Self {

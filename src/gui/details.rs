@@ -21,6 +21,7 @@ pub fn render_certificate_details(
 
     // Cabeçalho Rápido do Certificado Ativo
     if let Some(cert) = state.selected_certificate().cloned() {
+        tracing::debug!("[GUI-DETAILS] Rendering details for cert: id={}, name='{}'", cert.id, cert.subject.clean_name());
         ui.horizontal(|ui| {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button(RichText::new("🖥 Abrir no Windows").strong()).on_hover_text("Abre a janela nativa de Certificado do Windows (certmgr)").clicked() {
