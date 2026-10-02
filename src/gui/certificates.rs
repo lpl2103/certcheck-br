@@ -95,7 +95,7 @@ pub fn render_certificates_sidebar(
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("⚠").color(colors.error).strong().size(12.0));
-                    ui.label(RichText::new(err).color(colors.error).size(11.5));
+                    ui.add(egui::Label::new(RichText::new(err).color(colors.error).size(11.5)).wrap());
                 });
             });
     }
@@ -338,7 +338,7 @@ pub fn render_certificates_sidebar(
                         // Documento formatado se disponível com botão de cópia rápida
                         if let Some(cnpj) = cert.identity.formatted_cnpj() {
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(format!("🏢 CNPJ: {}", cnpj)).size(12.0).color(colors.neutral));
+                                ui.add(egui::Label::new(RichText::new(format!("🏢 CNPJ: {}", cnpj)).size(12.0).color(colors.neutral)).truncate());
                                 if ui.small_button("📋").on_hover_text("Copiar CNPJ").clicked() {
                                     ui.ctx().copy_text(cnpj);
                                 }
@@ -351,7 +351,7 @@ pub fn render_certificates_sidebar(
                                     format!("👤 Resp CPF: {}", cpf)
                                 };
                                 ui.horizontal(|ui| {
-                                    ui.label(RichText::new(resp_text).size(11.5).color(colors.neutral));
+                                    ui.add(egui::Label::new(RichText::new(resp_text).size(11.5).color(colors.neutral)).truncate());
                                     if ui.small_button("📋").on_hover_text("Copiar CPF").clicked() {
                                         ui.ctx().copy_text(cpf);
                                     }
@@ -359,7 +359,7 @@ pub fn render_certificates_sidebar(
                             }
                         } else if let Some(cpf) = cert.identity.formatted_cpf() {
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(format!("👤 CPF: {}", cpf)).size(12.0).color(colors.neutral));
+                                ui.add(egui::Label::new(RichText::new(format!("👤 CPF: {}", cpf)).size(12.0).color(colors.neutral)).truncate());
                                 if ui.small_button("📋").on_hover_text("Copiar CPF").clicked() {
                                     ui.ctx().copy_text(cpf);
                                 }
@@ -370,7 +370,7 @@ pub fn render_certificates_sidebar(
 
                         // Emissor resumido
                         let issuer = cert.issuer.display_name();
-                        ui.label(RichText::new(format!("🏛 {}", issuer)).size(11.5).color(colors.neutral));
+                        ui.add(egui::Label::new(RichText::new(format!("🏛 {}", issuer)).size(11.5).color(colors.neutral)).truncate());
 
                         ui.add_space(4.0);
 

@@ -180,7 +180,7 @@ fn render_metadata_card(ui: &mut Ui, cert: &crate::certificate::CertificateInfo,
 fn render_metadata_row(ui: &mut Ui, icon: &str, label: &str, value: &str, colors: &ThemeColors) {
     ui.label(RichText::new(icon).size(14.0));
     ui.label(RichText::new(label).strong().size(13.5).color(colors.neutral));
-    ui.label(RichText::new(value).size(13.5).strong());
+    ui.add(egui::Label::new(RichText::new(value).size(13.5).strong()).wrap());
     ui.end_row();
 }
 
@@ -246,7 +246,7 @@ fn render_compliance_card(
                         ui.label(RichText::new(label).strong().size(13.5));
 
                         // Coluna 4: Mensagem de diagnóstico detalhada
-                        ui.label(RichText::new(msg).color(colors.neutral).size(12.5));
+                        ui.add(egui::Label::new(RichText::new(msg).color(colors.neutral).size(12.5)).wrap());
 
                         ui.end_row();
                     }

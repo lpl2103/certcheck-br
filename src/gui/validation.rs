@@ -91,7 +91,7 @@ pub fn render_validation_panel(
                 ui.add_space(3.0);
 
                 // Linha 2: Mensagem clara do diagnóstico
-                ui.label(RichText::new(&check.message).size(13.0));
+                ui.add(egui::Label::new(RichText::new(&check.message).size(13.0)).wrap());
 
                 // Linha 3: Detalhes Técnicos Avançados (se houver)
                 if let Some(details) = &check.technical_details {
@@ -107,7 +107,7 @@ pub fn render_validation_panel(
                                     .corner_radius(CornerRadius::same(4))
                                     .inner_margin(Margin::same(6))
                                     .show(ui, |ui| {
-                                        ui.label(RichText::new(details).monospace().size(11.0));
+                                        ui.add(egui::Label::new(RichText::new(details).monospace().size(11.0)).wrap());
                                     });
                             },
                         );

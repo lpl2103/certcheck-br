@@ -40,20 +40,25 @@ pub fn render_certificate_details(
                     });
                 }
 
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.label(RichText::new("📜").size(22.0));
-                    ui.vertical(|ui| {
-                        ui.add(egui::Label::new(RichText::new(cert.subject.clean_name()).size(16.0).strong()).truncate());
-                        ui.add(
-                            egui::Label::new(
-                                RichText::new(format!("{} • Emissor: {}", cert.cert_type, cert.issuer.display_name()))
-                                    .size(12.0)
-                                    .color(colors.neutral),
-                            )
-                            .truncate(),
-                        );
-                    });
-                });
+                let rem_w = (ui.available_width() - 8.0).max(60.0);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(rem_w, ui.available_height()),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.label(RichText::new("📜").size(22.0));
+                        ui.vertical(|ui| {
+                            ui.add(egui::Label::new(RichText::new(cert.subject.clean_name()).size(15.5).strong()).truncate());
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(format!("{} • Emissor: {}", cert.cert_type, cert.issuer.display_name()))
+                                        .size(11.5)
+                                        .color(colors.neutral),
+                                )
+                                .truncate(),
+                            );
+                        });
+                    },
+                );
             });
         });
         ui.add_space(6.0);
@@ -63,7 +68,7 @@ pub fn render_certificate_details(
 
     // Barra de Navegação por Abas com Emojis Concisos
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 3.0;
+        ui.spacing_mut().item_spacing.x = 2.0;
         let tabs = [
             (DetailTab::Resumo, "📊 Resumo"),
             (DetailTab::Identidade, "👤 Identidade"),
@@ -81,7 +86,7 @@ pub fn render_certificate_details(
 
         for (tab, label) in tabs {
             let is_selected = state.active_tab == tab;
-            if ui.selectable_label(is_selected, RichText::new(label).size(13.0)).clicked() {
+            if ui.selectable_label(is_selected, RichText::new(label).size(12.5)).clicked() {
                 state.active_tab = tab;
             }
         }

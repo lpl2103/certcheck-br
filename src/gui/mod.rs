@@ -301,18 +301,21 @@ impl App for CertCheckApp {
         // Barra Lateral Esquerda: Gerenciador e Lista de Certificados em Cartões
         egui::SidePanel::left("cert_sidebar")
             .resizable(true)
-            .default_width(360.0)
-            .min_width(310.0)
-            .max_width(520.0)
+            .default_width(330.0)
+            .min_width(280.0)
+            .max_width(460.0)
             .show(ctx, |ui| {
                 render_certificates_sidebar(ui, &mut self.state, &self.command_sender);
             });
 
         // Painel Central: Diagnóstico Técnico Completo e Abas
         egui::CentralPanel::default().show(ctx, |ui| {
+            let max_w = ui.available_width();
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
+                .max_width(max_w)
                 .show(ui, |ui| {
+                    ui.set_max_width(max_w);
                     render_certificate_details(ui, &mut self.state, &self.command_sender);
                 });
         });
@@ -428,7 +431,7 @@ fn render_password_dialog(
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(RichText::new("⚠").color(colors.error).strong());
-                            ui.label(RichText::new(err).color(colors.error).size(12.0));
+                            ui.add(egui::Label::new(RichText::new(err).color(colors.error).size(12.0)).wrap());
                         });
                     });
             }
@@ -639,10 +642,13 @@ fn render_update_dialog(
                         .stroke(egui::Stroke::new(1.0_f32, colors.error))
                         .inner_margin(egui::Margin::symmetric(10, 6))
                         .show(ui, |ui| {
-                            ui.label(
-                                RichText::new(format!("Erro ao atualizar: {}", err))
-                                    .color(colors.error)
-                                    .size(12.0),
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(format!("Erro ao atualizar: {}", err))
+                                        .color(colors.error)
+                                        .size(12.0),
+                                )
+                                .wrap(),
                             );
                         });
 
